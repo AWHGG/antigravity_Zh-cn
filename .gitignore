@@ -1,0 +1,14 @@
+scratch/
+_temp_asar/
+node_modules/
+.DS_Store
+AGENTS.md
+
+# Tool-specific exclusions
+.reasonix/
+.codex/
+codex/
+.codegraph/
+# Temporary and test files
+_temp_probe/
+hello_world.js
