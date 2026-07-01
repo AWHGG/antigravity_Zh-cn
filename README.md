@@ -19,6 +19,19 @@
 ### 3. 详细参数设置面板
 ![详细参数设置面板](./showimg/showmenu.png)
 
+
+---
+
+## ✨ 核心特色 & 体验优化
+
+相比于普通的粗糙词条替换，本项目在底层实现了数项独创的技术优化，保障了极致的极客使用体验：
+
+*   🛡️ **会话对话区物理隔离防线**：在引擎中专门针对聊天气泡容器（`message-content`, `chat-message` 等）构筑了物理级别防护网。**AI 输出的长篇 Markdown 回答、英文原版文档解释、甚至输出的代码段落，绝不会被暴力翻译污染误伤**，完美保护编程代码的纯净性。
+*   🔄 **智能体动作日志“双时态”完美闭环**：全量捕获并汉化智能体在运行动作时的“正在做 (-ing)”与“做完了 (-ed)”时态（如 `Exploring/Explored`、`Thinking/Thought`、`Running/Ran`、`Executing/Executed` ），杜绝状态交替时的英文闪烁。
+*   ⏳ **智能时长与计时自适应**：精准捕获智能体在长时间思考、执行、等待时的持续时长提示（如 `Thinking for 5s...` ➔ `已思考 5s...`，`Running for 12s` ➔ `已运行 12s`），完美记录后台工作心跳。
+*   🧩 **复合数量词原地自适应替换**：智能解析形如 `1 file, 1 folder, 1 page`、`3 files, 2 folders` 等任意逗号分隔的多数量词组合，在完美保留原版逗号与空格排版的前题下，原地无缝转译为中文。
+*   🎛️ **常驻状态提示栏高优先级拦截**：完美捕获并拦截底部的后台常驻子任务提示条（如 `2 subagents/tasks running` ➔ `2 个子智能体/任务正在运行`），彻底终结由于翻译覆盖冲突产生的 `1 个子智能体 running` 尴尬中英拼接。
+
 ---
 
 ## 📂 项目文件结构
@@ -42,10 +55,10 @@
   如果您本地安装了 Git，可以直接在终端运行克隆命令：
   ```bash
   # 如果您在国内，推荐使用下方代理加速克隆地址：
-  git clone https://mirror.ghproxy.com/https://github.com/qqxpee/antigravity2-cn.git
+  git clone https://mirror.ghproxy.com/https://github.com/AWHGG/antigravity-cn.git
   
   # 如果您配置了全局代理，可直接使用官方地址：
-  git clone https://github.com/qqxpee/antigravity2-cn.git
+  git clone https://github.com/AWHGG/antigravity-cn.git
   ```
 
 ---
