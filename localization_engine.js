@@ -391,7 +391,7 @@ function generateJs() {
                     });
                 } else if (/^Explored (\\d+) files?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Explored (\\d+) files?$/i, (match, num) => {
-                        return "探索了 " + num + " 个文件";
+                        return "已分析 " + num + " 个文件";
                     });
                 } else if (/^Analyzed (.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Analyzed (.+)$/i, (match, prefix) => {
