@@ -93,7 +93,7 @@ function generateJs() {
     const translatedValues = new WeakMap();
 
     // 禁区类名/属性特征
-    const BLOCKED_CLASSES = ['monaco', 'editor', 'terminal', 'output', 'debug', 'code', 'artifact', 'suggest', 'message', 'chat', 'markdown'];
+    const BLOCKED_CLASSES = ['monaco', 'editor', 'terminal', 'output', 'debug', 'code', 'artifact', 'suggest', 'message', 'chat', 'markdown', 'thought', 'thinking', 'reason'];
     const BLOCKED_TAGS = ['SCRIPT', 'STYLE', 'CODE', 'PRE', 'INPUT', 'TEXTAREA', 'SVG', 'CANVAS', 'SYMBOL', 'PATH'];
 
     function norm(s) {
