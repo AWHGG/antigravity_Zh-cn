@@ -55,10 +55,10 @@
   如果您本地安装了 Git，可以直接在终端运行克隆命令：
   ```bash
   # 如果您在国内，推荐使用下方代理加速克隆地址：
-  git clone https://mirror.ghproxy.com/https://github.com/AWHGG/antigravity-cn.git
+  git clone https://mirror.ghproxy.com/https://github.com/AWHGG/antigravity_Zh-cn.git
   
   # 如果您配置了全局代理，可直接使用官方地址：
-  git clone https://github.com/AWHGG/antigravity-cn.git
+  git clone https://github.com/AWHGG/antigravity_Zh-cn.git
   ```
 
 ---
