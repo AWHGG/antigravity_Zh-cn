@@ -456,5 +456,6 @@
     "Select Project Ctrl+;": "选择项目 Ctrl+;",
     "Select Project": "选择项目",
     "Confirm Undo": "确认撤销",
-    "This undo action will not make any code changes.": "此撤销操作不会对代码进行任何更改。"
+    "This undo action will not make any code changes.": "此撤销操作不会对代码进行任何更改。",
+    "Confirming this undo action will make the following changes:": "确认此撤销操作将进行以下更改："
 }
