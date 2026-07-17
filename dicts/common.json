@@ -475,5 +475,13 @@
     "Project Name": "项目名称",
     "Open IDE": "打开 IDE",
     "View Stacked Diff": "查看层叠对比",
-    "Expand All": "展开全部"
+    "Expand All": "展开全部",
+    "Status: Fired": "状态：已触发",
+    "Schedule sleep timer: Timer has expired": "计划休眠定时器：定时器已到期",
+    "Uploads": "已上传文件",
+    "Media": "媒体文件",
+    "Today": "今天",
+    "Send message Enter": "发送消息 Enter",
+    "Queue message (Alt+Enter)": "排队消息 (Alt+Enter)",
+    "Queue message": "排队消息"
 }

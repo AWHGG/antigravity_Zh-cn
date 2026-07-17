@@ -389,6 +389,10 @@ function generateJs() {
                         let unitStr = unit || "";
                         return "思考了 " + num + unitStr;
                     });
+                } else if (/^Timed (\\d+)\\s+seconds?$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^Timed (\\d+)\\s+seconds?$/i, (match, num) => {
+                        return "计时 " + num + " 秒";
+                    });
                 } else if (/^Explored (\\d+) files?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Explored (\\d+) files?$/i, (match, num) => {
                         return "探索了 " + num + " 个文件";
