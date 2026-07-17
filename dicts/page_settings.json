@@ -470,5 +470,9 @@
     "Rules and Customizations": "规则与自定义",
     "Restore Defaults": "恢复默认设置",
     "Reset Defaults": "重置为默认值",
-    "Settings Saved": "设置已保存"
+    "Settings Saved": "设置已保存",
+    "Also includes": "也包含",
+    "when working in this project.": "（当在此项目中工作时）。",
+    "Use Global": "使用全局设置",
+    "Uses global settings when working in this project.": "在此项目中工作时使用全局设置。"
 }
