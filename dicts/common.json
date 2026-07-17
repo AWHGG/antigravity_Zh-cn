@@ -473,5 +473,7 @@
     "Conversation ID": "会话 ID",
     "Workspace Name": "工作区名称",
     "Project Name": "项目名称",
-    "Open IDE": "打开 IDE"
+    "Open IDE": "打开 IDE",
+    "View Stacked Diff": "查看层叠对比",
+    "Expand All": "展开全部"
 }
