@@ -474,5 +474,11 @@
     "Also includes": "也包含",
     "when working in this project.": "（当在此项目中工作时）。",
     "Use Global": "使用全局设置",
-    "Uses global settings when working in this project.": "在此项目中工作时使用全局设置。"
+    "Uses global settings when working in this project.": "在此项目中工作时使用全局设置。",
+    "Configure agent execution, queued message delivery, and permissions.": "配置智能体执行、排队消息发送以及权限。",
+    "Execution": "执行设置",
+    "Queued Messages": "排队消息",
+    "Configure when follow-up messages are sent.": "配置后续消息的发送时机。",
+    "Queue After Turn": "会话轮次后排队",
+    "Send Immediately": "立即发送"
 }
