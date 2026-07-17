@@ -491,8 +491,16 @@ function generateJs() {
                         const parent = node.parentElement;
                         if (parent) {
                             try {
-                                parent.style.setProperty('white-space', 'nowrap', 'important');
-                                parent.style.setProperty('width', 'auto', 'important');
+                                const tag = parent.tagName.toUpperCase();
+                                const className = parent.className || "";
+                                // 只对按钮、链接，或者类名包含 btn, button, tab, menu 等显式交互特征的控件父级应用防折行
+                                const isControl = ['BUTTON', 'A'].includes(tag) || 
+                                    (typeof className === 'string' && 
+                                    (className.includes('btn') || className.includes('button') || className.includes('tab') || className.includes('menu')));
+                                if (isControl) {
+                                    parent.style.setProperty('white-space', 'nowrap', 'important');
+                                    parent.style.setProperty('width', 'auto', 'important');
+                                }
                             } catch (e) {}
                         }
                     }
