@@ -1,0 +1,18 @@
+[
+  {
+    "text": "例如：/path/to/file",
+    "from": "通用"
+  },
+  {
+    "text": "https://open-vsx.org/vscode/item",
+    "from": "通用"
+  },
+  {
+    "text": "https://open-vsx.org/vscode/gallery",
+    "from": "通用"
+  },
+  {
+    "text": "输入头像 URL（可选）",
+    "from": "通用"
+  }
+]
