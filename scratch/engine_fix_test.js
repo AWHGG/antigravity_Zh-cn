@@ -116,15 +116,17 @@ async function runEngine(html) {
   dom.window.close();
 }
 
-// 2.2 动态句式回归（本次修复的失效正则分支，全部走初始全量扫描）
+// 2.2 动态句式与唯一机制边界（动词步骤摘要的引擎整句支路已移除，字典+分片计数是唯一机制）
 {
   const cases = [
-    ['Explored 2 files', '已探索 2 个文件'],
-    ['Analyzed 3 files', '已分析 3 个文件'],
-    ['Edited 1 file', '已编辑 1 个文件'],
-    ['Created 2 folders', '已创建 2 个文件夹'],
-    ['Deleted 1 file', '已删除 1 个文件'],
-    ['Searching knowledge', '正在搜索 knowledge'],
+    // 单节点整句不再由引擎翻译（避免与字典双重机制；官方 UI 实际按节点拆分渲染）
+    ['Explored 2 files', 'Explored 2 files'],
+    ['Analyzed 3 files', 'Analyzed 3 files'],
+    ['Edited 1 file', 'Edited 1 file'],
+    ['Created 2 folders', 'Created 2 folders'],
+    ['Deleted 1 file', 'Deleted 1 file'],
+    ['Searching knowledge', 'Searching knowledge'],
+    // 引擎独占的动态支路（字典无法以精确键覆盖的模板形态）
     ['All scheduled tasks run as gemini-3-pro.', '所有计划任务均以 gemini-3-pro 模型运行。'],
     ['A scheduled task with ID t1 already exists.', 'ID 为 t1 的任务已存在。'],
     ['+ Skill', '+ 技能'],
@@ -136,11 +138,15 @@ async function runEngine(html) {
     const got = dom.window.document.getElementById('dyn' + i).textContent;
     check('动态句式 "' + c[0] + '" → "' + c[1] + '"', got === c[1], '实际: ' + JSON.stringify(got));
   });
-  // 白名单 \b 修复：带函数调用特征的步骤摘要不再被"代码特征过滤"拦截
-  const dom2 = await runEngine('<div id="wl">Explored foo.bar()</div>');
-  const wl = dom2.window.document.getElementById('wl').textContent;
-  check('白名单 \\b 修复：Explored foo.bar() → 已探索 foo.bar()', wl === '已探索 foo.bar()', '实际: ' + JSON.stringify(wl));
-  dom.window.close(); dom2.window.close();
+  // 唯一机制回归（官方实际渲染形态）：动作词节点走字典、计数节点走分片计数
+  const dom2 = await runEngine('<span id="v1">Explored </span><span id="v2">12 files</span>');
+  check('拆分节点:动作词走字典', dom2.window.document.getElementById('v1').textContent === '已探索 ', JSON.stringify(dom2.window.document.getElementById('v1').textContent));
+  check('拆分节点:计数走分片', dom2.window.document.getElementById('v2').textContent === '12 个文件', JSON.stringify(dom2.window.document.getElementById('v2').textContent));
+  // 白名单 \b：仅保证步骤摘要不被误判为代码（整句支路已删，文本原样保留并进入漏译采集）
+  const dom3 = await runEngine('<div id="wl">Explored foo.bar()</div>');
+  const wl = dom3.window.document.getElementById('wl').textContent;
+  check('白名单 \\b：含括号摘要不误判为代码（原样保留）', wl === 'Explored foo.bar()', '实际: ' + JSON.stringify(wl));
+  dom.window.close(); dom2.window.close(); dom3.window.close();
 }
 
 // 2.3 属性翻译边界（原作者设计：仅插入子树根的 placeholder/title/aria-label 参与翻译，

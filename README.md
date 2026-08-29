@@ -15,7 +15,7 @@
 ## 架构（三层）
 
 - **引擎 `localization_engine.js`**（唯一核心）：
-  - 渲染进程引擎 `generateJs()` → 注入 `preload.js`，MutationObserver 驱动的 DOM 实时翻译；三级边界：禁区熔断（代码/终端/用户输入）→ AI 流式正文熔断 → 交互控件与常规 UI 放行；含动态句式正则、Shadow DOM、元素属性（placeholder/title/aria-label）翻译与漏译采集（`window.__AG_DUMP_MISSING__()`）。
+  - 渲染进程引擎 `generateJs()` → 注入 `preload.js`，MutationObserver 驱动的 DOM 实时翻译；三级边界：禁区熔断（代码/终端/用户输入）→ AI 流式正文熔断 → 交互控件与常规 UI 放行；含动态句式正则、Shadow DOM、元素属性（placeholder/title/aria-label）翻译与漏译采集（`window.__AG_DUMP_MISSING__()`）。动词步骤摘要（Explored/Analyzed 等）**不设整句支路**——字典动作词精确匹配 + 分片计数是唯一机制，避免双重翻译。
   - 主进程拦截 `generateI18nCoreJs()` → 写入 `antigravity_i18n_core.js`，hook 原生菜单/托盘/对话框/通知（动态文案以渲染层为权威实现，core 仅覆盖静态文案与少量高频句式）。
   - 安装/还原 `install20()` / `restore20()`：解包 → 内容级状态判定（clean/legacy/new）→ 官方备份保护 → 注入 main.js + preload.js → 重打包 → 完整性校验。
 - **字典 `dicts/*.json`**：`英文原文 → 中文`，安装时合并为一张表（key 做空白/引号归一化，未命中再走小写兜底）。

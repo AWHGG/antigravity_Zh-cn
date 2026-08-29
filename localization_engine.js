@@ -636,30 +636,8 @@ function generateJs() {
                     newVal = valNorm.replace(/^Timed (\\d+)\\s+seconds?$/i, (match, num) => {
                         return "计时 " + num + " 秒";
                     });
-                } else if (/^Explored(?:\\s+(.+))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Explored(?:\\s+(.+))?$/i, (match, body) => {
-                        if (!body) return "已探索";
-                        let isWorking = / Working\\.\\.\\.$/i.test(body);
-                        let cleanBody = body.replace(/ Working\\.\\.\\.$/i, '');
-                        let translatedBody = translateCountList(cleanBody);
-                        return (isWorking ? "正在探索 " : "已探索 ") + translatedBody + (isWorking ? "..." : "");
-                    });
-                } else if (/^Analyzed(?:\\s+(.+))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Analyzed(?:\\s+(.+))?$/i, (match, prefix) => {
-                        if (!prefix) return "已分析";
-                        let isWorking = / Working\\.\\.\\.$/i.test(prefix);
-                        let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanPrefix);
-                        return (isWorking ? "正在分析 " : "已分析 ") + trans + (isWorking ? "..." : "");
-                    });
-                } else if (/^Edited(?:\\s+(.+))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Edited(?:\\s+(.+))?$/i, (match, prefix) => {
-                        if (!prefix) return "已编辑";
-                        let isWorking = / Working\\.\\.\\.$/i.test(prefix);
-                        let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanPrefix);
-                        return (isWorking ? "正在编辑 " : "已编辑 ") + trans + (isWorking ? "..." : "");
-                    });
+                // 动词步骤摘要（Explored/Analyzed/Edited/Created/Deleted/Searching）不设引擎整句支路：
+                // 字典动作词精确匹配 + 分片计数（官方 UI 将动作词与计数拆成独立文本节点）是唯一机制，避免双重翻译
                 } else if (/^(?:Ran|Running)\\s+(\\d+)\\s+commands?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^(Ran|Running)\\s+(\\d+)\\s+commands?$/i, (m, verb, num) => {
                         return (verb.toLowerCase() === 'running' ? "正在运行 " : "已运行 ") + num + " 条命令";
@@ -676,8 +654,6 @@ function generateJs() {
                         let res = body.replace(/(\\d+)\\s+results?/i, '$1 个结果').replace(/(\\d+)\\s+result/i, '$1 个结果');
                         return "已搜索 " + res;
                     });
-                } else if (/^Searching\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Searching\\s+(.+)$/i, "正在搜索 $1");
                 } else if (/^Checked task\\s+(.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Checked task\\s+(.+)$/i, (match, target) => {
                         return "已检查任务 " + translateTaskTarget(target);
@@ -725,22 +701,6 @@ function generateJs() {
                 } else if (/^Creating task\\s+(.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Creating task\\s+(.+)$/i, (match, target) => {
                         return "正在创建任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Created(?:\\s+(.+))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Created(?:\\s+(.+))?$/i, (match, body) => {
-                        if (!body) return "已创建";
-                        let isWorking = / Working\\.\\.\\.$/i.test(body);
-                        let cleanBody = body.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanBody);
-                        return (isWorking ? "正在创建 " : "已创建 ") + trans + (isWorking ? "..." : "");
-                    });
-                } else if (/^Deleted(?:\\s+(.+))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Deleted(?:\\s+(.+))?$/i, (match, body) => {
-                        if (!body) return "已删除";
-                        let isWorking = / Working\\.\\.\\.$/i.test(body);
-                        let cleanBody = body.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanBody);
-                        return (isWorking ? "正在删除 " : "已删除 ") + trans + (isWorking ? "..." : "");
                     });
                 } else if (/^Sent input to task\\s+(.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Sent input to task\\s+(.+)$/i, (match, target) => {
