@@ -81,7 +81,6 @@ function loadDictionary() {
 
 function generateJs(preloadedDict) {
     const fullDict = preloadedDict || loadDictionary();
-    
     const dictJson = JSON.stringify(fullDict);
 
     const jsSource = `${SIGNATURE_START}
@@ -90,8 +89,7 @@ function generateJs(preloadedDict) {
     const rootEl = document.documentElement;
     if (!rootEl) return;
 
-    // 原子级单实例互斥锁：跨 preload 与 main world 共享底层 DOM 属性，第 1 行立即原子落锁，
-    // 彻底杜绝两个 JS World 同时各跑一套 MutationObserver 导致的双重观察者冲突
+    // 单实例互斥锁：通过在根节点设置标记与全局变量，防止 preload 与 main world 重复初始化双重 MutationObserver
     try {
         if (rootEl.hasAttribute('data-ag-i18n-active') || (rootEl.dataset && rootEl.dataset.agHanhua === '1')) return;
         rootEl.setAttribute('data-ag-i18n-active', '1');
@@ -104,7 +102,7 @@ function generateJs(preloadedDict) {
     }
     window.__AG_HANHUA_INSTALLED__ = true;
 
-    // 注入防中文字符异常折行全局 CSS 护盾（:has 降级：拆分两条规则，旧版 Chromium 忽略未知选择器不影响基础防护）
+    // 排版护盾样式：为按钮、菜单与气泡添加 nowrap/keep-all 规则，防止中文字符由于容器折行计算异常断字
     try {
         if (!document.getElementById('ag-chinese-layout-guard')) {
             const styleEl = document.createElement('style');
@@ -120,8 +118,6 @@ function generateJs(preloadedDict) {
         }
     } catch (e) {}
 
-    // V12.0 终极隔离版：基于容器回溯的物理隔离引擎
-    // 逻辑：不再仅仅检查当前标签，而是向上回溯父级，识别“代码/编辑器”禁区
     const map = new Map(Object.entries(DICT_PLACEHOLDER));
     const lowerMap = new Map();
     for (const [k, v] of map.entries()) lowerMap.set(k.toLowerCase(), v);
@@ -129,18 +125,14 @@ function generateJs(preloadedDict) {
     const translatedValues = new WeakMap();
     let isMutating = false;
 
-    // =========================================================================
-    // 🛡️ 工业级全维度安全隔离防护网 (Fortified Security & Data Isolation Mesh)
-    // =========================================================================
-    
-    // 1. 绝对禁止标签 (标签级物理熔断: 脚本/样式/代码/媒体/内嵌框架/输入框)
+    // 标签级免翻白名单：包含脚本、样式、代码、多媒体、SVG 与表单输入标签，TreeWalker 遇到时整树跳过
     const BLOCKED_TAGS = new Set([
         'SCRIPT', 'STYLE', 'CODE', 'PRE', 'INPUT', 'TEXTAREA', 'SVG', 'CANVAS', 
         'SYMBOL', 'PATH', 'KBD', 'SAMP', 'VAR', 'TEMPLATE', 'MATH', 'AUDIO', 'VIDEO', 
         'SOURCE', 'TRACK', 'IFRAME', 'OBJECT', 'EMBED', 'NOSCRIPT'
     ]);
 
-    // 2. 🛡️ AI 正文、思考链与流式打字专属小容器（精准锁定真实 Markdown 段落与思考链，绝不连坐消息外壳、步骤条与操作控件）
+    // AI 流式正文与思维链容器选择器：匹配 Markdown 排版与推导推断容器，保护 AI 生成内容原样输出
     const AI_STREAM_PROSE_SELECTOR = [
         '.animate-markdown',
         '.md-divider-spacing',
@@ -162,58 +154,67 @@ function generateJs(preloadedDict) {
         '[data-is-generating] .prose'
     ].join(', ');
 
-    // 3. 显微镜级核心安全禁区小容器（拒绝大容器一刀切，精确锁定真正的代码正文、终端缓冲区与用户输入段落）：
-    //    核心锁定：代码行视口、代码块、终端字符屏幕、交付件正文、输入框与用户纯提问文本、公式与免翻标记
+    // 编辑器代码视口、终端字符屏与用户输入选择器：保护代码编辑区与命令行字符流不被篡改
     const FORBIDDEN_SUBTREE_SELECTOR = [
-        // Monaco / VS Code / Diff 代码正文小容器（精准锁定代码行视口，保护代码；释放边距槽.margin加号气泡与面包屑）
+        // Monaco / VS Code / Diff 代码行视口（释放边距槽.margin加号气泡与面包屑）
         '.lines-content', '[class*="lines-content"]', '.view-lines', '[class*="view-lines"]', '.view-line', '[class*="view-line"]',
         '[data-mode-id] .lines-content', '[data-mode-id] .view-lines', '[data-mode-id] .view-line',
         '.monaco-diff-editor .lines-content', '.monaco-editor .lines-content',
         '.decorationsOverviewRuler', '.suggest-widget .monaco-list', '.parameter-hints-widget',
-        // CodeMirror 5 & 6 代码小容器
+        // CodeMirror 5 & 6 代码容器
         '.cm-content', '[class*="cm-content"]', '.cm-line', '[class*="cm-line"]', '.cm-editor .cm-scroller',
         '.CodeMirror-lines', '.CodeMirror-line', '.CodeMirror-code',
-        // Ace Editor 代码小容器
+        // Ace Editor 代码容器
         '.ace_content', '.ace_line', '[class*="ace_line"]', '.ace_layer', '.ace_text-layer',
-        // 通用 Markdown 与 HTML 语法高亮代码小容器
+        // 通用 Markdown 与 HTML 语法高亮代码块
         'pre', 'code', 'kbd', 'samp', 'var',
         '.hljs', '.hljs-line', '[class*="hljs-"]', 'code[class*="language-"]', 'pre[class*="language-"]', '[class*="shiki"]',
         '.code-block pre', '.code-block code', '.code-line', '.line-content',
-        // 终端字符输出小容器（保护终端字符流，释放终端工具栏与新建标签页按钮）
+        // 终端字符输出容器（保护字符流输出，释放外层工具栏按钮）
         '.xterm-screen', '.xterm-rows', '.xterm-row', '.xterm-accessibility', '.xterm-accessibility-tree',
         '[class*="terminal-screen"]', '[class*="terminal-rows"]',
-        // 真实用户表单输入控件（保护用户输入，释放外层操作按钮）
+        // 用户表单输入控件（保护用户输入文本，释放外层操作按钮）
         'input', 'textarea', '[contenteditable="true"]', '[role="textbox"]', '[role="searchbox"]',
         // 公式、免翻标记、矢量图与模板
         '.katex', '.katex-html', '[translate="no"]', '.notranslate', 'svg', 'math', 'template',
-        // 交付件内部真实正文与代码（精细锁定内部正文与代码，释放外层编辑器边距槽、加号控件与工具条）
+        // 交付件内部正文与代码块
         '[class*="artifact-markdown"] pre', '[class*="artifact-markdown"] code',
         '[class*="artifact-code"] .lines-content', '[class*="artifact-code"] pre', '[class*="artifact-code"] code',
         '[class*="artifact-preview"] .lines-content', '[class*="artifact-preview"] pre', '[class*="artifact-preview"] code',
         '[class*="artifact-content"] pre', '[class*="artifact-content"] code',
         '[class*="artifact-body"] pre', '[class*="artifact-body"] code',
         '[class*="artifact-details"] pre', '[class*="artifact-details"] code',
-        // 用户提问纯文本段落（保护提问原文与代码，释放外围操作按钮与时间戳）
+        // 用户提问段落与原始代码块
         '[class*="user-input-step"] .whitespace-pre-wrap',
         '[data-turn-role="user"] .whitespace-pre-wrap',
         '[data-message-author="user"] .whitespace-pre-wrap',
         '[data-turn-role="user"] pre', '[data-turn-role="user"] code',
-        // 会话自定义历史标题
+        // 用户自定义历史会话标题
         'a[href*="/c/"] [class*="truncate"]',
         '[data-testid*="conversation-item"] [class*="truncate"]',
-        // 工具调用内部具体命令输出与终端代码（释放步骤条本身的标题、折叠箭头与悬浮气泡）
+        // 工具调用内部具体命令执行输出
         '[class*="tool-call-details"] pre', '[class*="tool-call-details"] code',
         '[data-testid*="tool-call-content"] pre', '[data-testid*="tool-call-content"] code',
         '[class*="tool-call-result"]', '[class*="terminal-output"]'
     ].join(', ');
 
-    // 未命中采集：收集“非禁区但未翻译”的英文文本，便于迭代补全字典（内存 Set 去重，零 I/O 开销）
+    // 合并禁区与流式选择器：供 TreeWalker 与 MutationObserver 执行单次 matches/closest 判定
+    const ALL_BLOCKED_SELECTOR = FORBIDDEN_SUBTREE_SELECTOR + ', ' + AI_STREAM_PROSE_SELECTOR;
+
+    // 漏译采集池：用于记录非禁区未命中字典的英文文本，供 CDP 自动化工具导出
     const missedTexts = new Set();
     const MISSED_TEXTS_MAX = 5000;
 
     function norm(s) {
-        if (!s) return '';
+        if (!s || typeof s !== 'string') return '';
         return s.replace(/\\s+/g, ' ').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').trim();
+    }
+
+    function lookup(s) {
+        if (!s) return null;
+        const n = norm(s);
+        if (!n) return null;
+        return map.get(n) || lowerMap.get(n.toLowerCase()) || null;
     }
 
     function unitToCn(unit) {
@@ -263,10 +264,9 @@ function generateJs(preloadedDict) {
 
     function translateTaskTarget(target) {
         if (!target) return '';
+        const trans = lookup(target);
+        if (trans) return trans;
         const normT = norm(target);
-        if (map.has(normT)) return map.get(normT);
-        const lowerT = normT.toLowerCase();
-        if (lowerMap.has(lowerT)) return lowerMap.get(lowerT);
         const taskMatch = normT.match(/^task-([a-zA-Z0-9_-]+)$/i);
         if (taskMatch) return '任务 ' + taskMatch[1];
         return target;
@@ -276,71 +276,448 @@ function generateJs(preloadedDict) {
         if (!val) return null;
         const match = val.match(/^(.+?)\\s*\\((Ctrl|Cmd|Alt|Shift|⌘|⌥|⇧|⌃)\\+?([^)]*)\\)$/i);
         if (match) {
-            const prefix = match[1].trim();
-            const normPref = norm(prefix);
-            const lowerPref = normPref.toLowerCase();
-            let transPref = null;
-            if (map.has(normPref)) {
-                transPref = map.get(normPref);
-            } else if (lowerMap.has(lowerPref)) {
-                transPref = lowerMap.get(lowerPref);
-            }
-            if (transPref) {
-                return transPref + " (" + match[2] + (match[3] ? "+" + match[3] : "") + ")";
-            }
+            const transPref = lookup(match[1]);
+            if (transPref) return transPref + " (" + match[2] + (match[3] ? "+" + match[3] : "") + ")";
         }
         const countMatch = val.match(/^(.+?)\\s*\\(([0-9]+)\\)$/);
         if (countMatch) {
-            const prefix = countMatch[1].trim();
-            const normPref = norm(prefix);
-            const lowerPref = normPref.toLowerCase();
-            let transPref = null;
-            if (map.has(normPref)) {
-                transPref = map.get(normPref);
-            } else if (lowerMap.has(lowerPref)) {
-                transPref = lowerMap.get(lowerPref);
-            }
-            if (transPref) {
-                return transPref + " (" + countMatch[2] + ")";
-            }
+            const transPref = lookup(countMatch[1]);
+            if (transPref) return transPref + " (" + countMatch[2] + ")";
         }
-        // 单字母缩写后缀：如 "Medium (M)" / "Low (L)" / "High (H)" —— 枚举选项常带快捷键字母，
-        // 整串匹配不到字典，这里翻译前缀并保留缩写（前缀未命中则不翻译，避免误伤）
+        // 单字母缩写后缀：如 "Medium (M)" / "Low (L)" / "High (H)"
         const letterMatch = val.match(/^(.+?)\\s*\\(([A-Za-z]{1,2})\\)$/);
         if (letterMatch) {
-            const prefix = letterMatch[1].trim();
-            const normPref = norm(prefix);
-            const lowerPref = normPref.toLowerCase();
-            let transPref = null;
-            if (map.has(normPref)) {
-                transPref = map.get(normPref);
-            } else if (lowerMap.has(lowerPref)) {
-                transPref = lowerMap.get(lowerPref);
-            }
-            if (transPref) {
-                return transPref + " (" + letterMatch[2] + ")";
-            }
+            const transPref = lookup(letterMatch[1]);
+            if (transPref) return transPref + " (" + letterMatch[2] + ")";
         }
         const symbolMatch = val.match(/^([+•*>\-])\\s+(.+)$/);
         if (symbolMatch) {
-            const sym = symbolMatch[1];
-            const content = symbolMatch[2].trim();
-            const normContent = norm(content);
-            const lowerContent = normContent.toLowerCase();
-            let transContent = null;
-            if (map.has(normContent)) {
-                transContent = map.get(normContent);
-            } else if (lowerMap.has(lowerContent)) {
-                transContent = lowerMap.get(lowerContent);
-            }
-            if (transContent) {
-                return sym + " " + transContent;
-            }
+            const transContent = lookup(symbolMatch[2]);
+            if (transContent) return symbolMatch[1] + " " + transContent;
         }
         return null;
     }
 
-    // 🛡️ 唯一单管道语义路由：纯扁平平行分支，严格 0 嵌套，逻辑直通到底
+    // Task 状态动作前缀映射表：用于匹配并转换任务状态机动作词
+    const TASK_VERB_ACTIONS = {
+        'checked': '已检查任务 ',
+        'checking': '正在检查任务 ',
+        'killed': '已终止任务 ',
+        'killing': '正在终止任务 ',
+        'started': '已启动任务 ',
+        'starting': '正在启动任务 ',
+        'paused': '已暂停任务 ',
+        'pausing': '正在暂停任务 ',
+        'resumed': '已恢复任务 ',
+        'resuming': '正在恢复任务 ',
+        'created': '已创建任务 ',
+        'creating': '正在创建任务 ',
+        'sent input to': '已向任务发送输入 ',
+        'sending input to': '正在向任务发送输入 '
+    };
+
+    // 动态句式翻译器：通过正则与结构提取，匹配带变量、计数、时长或动态状态的 UI 文本
+    function translateDynamicText(valNorm, originalVal, node) {
+        if (/^Refreshes in (.+?)$/i.test(valNorm)) {
+            return valNorm.replace(/^Refreshes in (.+?)$/i, (match, timeStr) => {
+                let tTrans = timeStr.trim()
+                    .replace(/(\\d+)\\s*days?/gi, '$1 天')
+                    .replace(/(\\d+)\\s*hours?/gi, '$1 小时')
+                    .replace(/(\\d+)\\s*minutes?/gi, '$1 分钟')
+                    .replace(/(\\d+)\\s*seconds?/gi, '$1 秒')
+                    .replace(/,\\s*/g, ' ')
+                    .replace(/\\s+/g, ' ');
+                return tTrans + "后刷新";
+            });
+        }
+        if (/^You have used some of your (.+?) limit, it will fully refresh in (.+?)\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^You have used some of your (.+?) limit, it will fully refresh in (.+?)\\.?$/i, (match, limitType, timeStr) => {
+                let lType = limitType.trim().toLowerCase();
+                let lTrans = limitType.trim();
+                if (lType === 'weekly') lTrans = '每周';
+                else if (lType === 'daily') lTrans = '每日';
+                else if (lType === 'monthly') lTrans = '每月';
+                else if (lType.includes('5-hour') || lType.includes('5 hour')) lTrans = '5 小时';
+                else {
+                    lTrans = lType.replace(/(\\d+)-hour/g, '$1 小时').replace(/(\\d+)\\s*hours?/g, '$1 小时');
+                }
+                let tTrans = timeStr.trim()
+                    .replace(/(\\d+)\\s*days?/gi, '$1 天')
+                    .replace(/(\\d+)\\s*hours?/gi, '$1 小时')
+                    .replace(/(\\d+)\\s*minutes?/gi, '$1 分钟')
+                    .replace(/(\\d+)\\s*seconds?/gi, '$1 秒')
+                    .replace(/,\\s*/g, ' ')
+                    .replace(/\\s+/g, ' ');
+                let prefix = "您已使用了部分";
+                if (lTrans === "每周" || lTrans === "每日" || lTrans === "每月") prefix += lTrans;
+                else prefix += " " + lTrans;
+                return prefix + "限制，将在 " + tTrans + "后完全刷新。";
+            });
+        }
+        if (/^Learn more about (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Learn more about (.+)$/i, (match, p) => {
+                const trans = lookup(p);
+                if (trans) return "了解更多关于 " + trans;
+                const pLower = p.toLowerCase();
+                let translatedPreset = p;
+                if (pLower.includes('inherit general')) translatedPreset = "继承通用设置 (Inherit General)";
+                else if (pLower.includes('inherit project')) translatedPreset = "继承项目设置 (Inherit Project)";
+                else if (pLower.includes('inherit global')) translatedPreset = "继承全局设置 (Inherit Global)";
+                return "了解更多关于 " + translatedPreset;
+            });
+        }
+        if (/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i.test(valNorm)) {
+            return valNorm.replace(/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i, (m, num, unit) => {
+                let uCn = '秒';
+                const uLower = unit.toLowerCase();
+                if (uLower.startsWith('m') && !uLower.startsWith('ms')) uCn = '分钟';
+                else if (uLower.startsWith('h')) uCn = '小时';
+                else if (uLower === 'ms') uCn = '毫秒';
+                return '计时 ' + num + ' ' + uCn;
+            });
+        }
+        if (/^Status:\\s*(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Status:\\s*(.+)$/i, (m, st) => {
+                const stNorm = norm(st);
+                let stCn = lookup(stNorm) || st;
+                const stLower = stNorm.toLowerCase();
+                if (stLower === 'fired') stCn = '已触发';
+                else if (stLower === 'running') stCn = '运行中';
+                else if (stLower === 'completed') stCn = '已完成';
+                else if (stLower === 'cancelled') stCn = '已取消';
+                else if (stLower === 'failed') stCn = '失败';
+                return '状态：' + stCn;
+            });
+        }
+        if (/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i.test(valNorm)) {
+            return valNorm.replace(/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i, (m, code, out) => {
+                if (out !== undefined) return '命令已退出，退出码 ' + code + '。输出：' + out;
+                return '命令已退出，退出码 ' + code;
+            });
+        }
+        if (/^(.+?)\\s+finished$/i.test(valNorm)) {
+            return valNorm.replace(/^(.+?)\\s+finished$/i, (m, prefix) => {
+                const pCn = lookup(prefix) || prefix;
+                return pCn + ' 已完成';
+            });
+        }
+        if (/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
+            return valNorm.replace(/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, count, branch) => {
+                if (branch) return '提交 ' + count + ' 个文件更改至 ' + branch;
+                return '提交 ' + count + ' 个文件更改至';
+            });
+        }
+        if (/^file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
+            return valNorm.replace(/^file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, branch) => {
+                if (branch) return '个文件更改至 ' + branch;
+                return '个文件更改至';
+            });
+        }
+        if (valNorm.toLowerCase() === 'to' && node && node.parentElement) {
+            const pText = node.parentElement.textContent || '';
+            if (/master|main|branch|changes|commit|更改|提交/i.test(pText)) {
+                return (originalVal || 'to').replace(/\\bto\\b/i, '至');
+            }
+        }
+        if (/^Inherits your (.+?) settings(.*)$/i.test(valNorm)) {
+            return valNorm.replace(/^Inherits your (.+?) settings(.*)$/i, (match, cat, rest) => {
+                let cLower = cat.toLowerCase().trim();
+                let catTrans = cat;
+                if (cLower === 'general') catTrans = '通用';
+                else if (cLower === 'project') catTrans = '项目';
+                else if (cLower === 'global') catTrans = '全局';
+                let restTrans = rest ? rest.trim() : '';
+                if (restTrans.includes('effective in this project') || restTrans.includes('在此项目中生效')) {
+                    restTrans = ' (在此项目中生效)。';
+                } else if (/^when working in this project\\.?$/i.test(restTrans)) {
+                    restTrans = '（在此项目中工作时）';
+                } else if (restTrans) {
+                    restTrans = ' ' + restTrans;
+                }
+                return "继承您的" + catTrans + "设置" + restTrans;
+            });
+        }
+        if (/^(\\d+)% of the customization budget is available\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^(\\d+)% of the customization budget is available\\.?$/i, '$1% 的定制预算可用。');
+        }
+        if (/^Send feedback as (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Send feedback as (.+)$/i, '以 $1 身份发送反馈');
+        }
+        if (/^Your Plan:\\s*(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Your Plan:\\s*(.+)$/i, '您的计划：$1');
+        }
+        // 合并：Yes, and always allow '...' (含可选 in this project)
+        if (/^Yes, and always allow '(.+?)'( in this project)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Yes, and always allow '(.+?)'( in this project)?$/i, (match, cmd, inProj) => {
+                return "是，且" + (inProj ? "在此项目中始终允许运行 '" : "始终允许运行 '") + cmd + "'";
+            });
+        }
+        if (/^(\\d+) tools? enabled$/i.test(valNorm)) {
+            return valNorm.replace(/^(\\d+) tools? enabled$/i, '$1 个工具已启用');
+        }
+        if (/^Show (\\d+) more(\\.\\.\\.|…)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Show (\\d+) more(\\.\\.\\.|…)?$/i, '显示另外 $1 个...');
+        }
+        // 合并：Show / Hide (all) N breakdowns
+        if (/^(Show|Hide)(?:\\s+(all))?\\s+(\\d+)\\s+breakdowns?$/i.test(valNorm)) {
+            return valNorm.replace(/^(Show|Hide)(?:\\s+(all))?\\s+(\\d+)\\s+breakdowns?$/i, (match, action, all, num) => {
+                const isShow = action.toLowerCase() === 'show';
+                return (isShow ? '显示' : '隐藏') + (all ? '全部 ' : ' ') + num + ' 个细目';
+            });
+        }
+        if (/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i.test(valNorm)) {
+            return valNorm.replace(/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i, (m, type, num) => {
+                const t = type.toLowerCase() === 'rules' ? '规则' : '技能';
+                return t + '：' + num + ' tokens';
+            });
+        }
+        if (/^Media \\((Today|Yesterday)\\s+(\\d{1,2}:\\d{2})\\s*(AM|PM)?\\)$/i.test(valNorm)) {
+            return valNorm.replace(/^Media \\((Today|Yesterday)\\s+(\\d{1,2}:\\d{2})\\s*(AM|PM)?\\)$/i, (m, day, time, ap) => {
+                const d = day.toLowerCase() === 'today' ? '今天' : '昨天';
+                return '媒体 (' + d + ' ' + time + (ap ? ' ' + ap : '') + ')';
+            });
+        }
+        if (/^Select model, current: (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Select model, current: (.+)$/i, '选择模型，当前：$1');
+        }
+        if (/^Refresh (MCP servers|quota and credits data)$/i.test(valNorm)) {
+            return valNorm.replace(/^Refresh (MCP servers|quota and credits data)$/i, (m, t) => {
+                if (t.toLowerCase() === 'mcp servers') return '刷新 MCP 服务器';
+                return '刷新配额与额度数据';
+            });
+        }
+        if (/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i, (match, lang) => {
+                let translatedLang = lang;
+                if (lang.toLowerCase() === 'dart and flutter') translatedLang = "Dart 和 Flutter";
+                return "提供为 " + translatedLang + " 的顺畅 (Happy Path) 开发流程量身定制的技能指令。";
+            });
+        }
+        if (/^(Worked|Working) for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
+            return valNorm.replace(/^(Worked|Working) for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, verb, num, unit) => {
+                return "已工作 " + num + " " + unitToCn(unit);
+            });
+        }
+        if (/^Thinking \\(?(\\d+)(s|m|h|d|w|mo|yr)?\\)?(\\.{1,3}|…)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Thinking \\(?(\\d+)(s|m|h|d|w|mo|yr)?\\)?(\\.{1,3}|…)?$/i, (match, num, unit, dots) => {
+                return "思考中 (" + num + " " + unitToCn(unit) + ")" + (dots || "…");
+            });
+        }
+        if (/^Waiting for (.+?)(\\.{1,3}|…)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Waiting for (.+?)(\\.{1,3}|…)?$/i, (match, target, dots) => {
+                let t = target.trim().toLowerCase();
+                let trans = target;
+                if (t === 'input') trans = "输入";
+                else if (t === 'user') trans = "用户";
+                else if (t === 'tool' || t === 'tools') trans = "工具";
+                else if (t === 'agent' || t === 'agents') trans = "智能体";
+                return "等待 " + trans + " 中...";
+            });
+        }
+        if (/^Thinking for (\\d+)(s|m|h|d|w|mo|yr)?(\\.{0,3}|…)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Thinking for (\\d+)(s|m|h|d|w|mo|yr)?(\\.{0,3}|…)?$/i, (match, num, unit, dots) => {
+                return "已思考 " + num + " " + unitToCn(unit) + (dots || "");
+            });
+        }
+        if (/^Running for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Running for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
+                return "已运行 " + num + " " + unitToCn(unit);
+            });
+        }
+        if (/^Executing for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Executing for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
+                return "已执行 " + num + " " + unitToCn(unit);
+            });
+        }
+        if (/^Thought for (\\d+)(s|m|h)?$/i.test(valNorm)) {
+            return valNorm.replace(/^Thought for (\\d+)(s|m|h)?$/i, (match, num, unit) => {
+                return "思考了 " + num + " " + unitToCn(unit);
+            });
+        }
+        if (/^(?:Ran|Running)\\s+(\\d+)\\s+commands?$/i.test(valNorm)) {
+            return valNorm.replace(/^(Ran|Running)\\s+(\\d+)\\s+commands?$/i, (m, verb, num) => {
+                return (verb.toLowerCase() === 'running' ? "正在运行 " : "已运行 ") + num + " 条命令";
+            });
+        }
+        if (/^Ran\\s+(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Ran\\s+(.+)$/i, (match, prefix) => {
+                let isWorking = / Working\\.\\.\\.$/i.test(prefix);
+                let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
+                let trans = translateCountList(cleanPrefix);
+                return (isWorking ? "正在执行 " : "已执行 ") + trans + (isWorking ? " 正在处理..." : "");
+            });
+        }
+        if (/^Searched\\s+(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Searched\\s+(.+)$/i, (match, body) => {
+                let res = body.replace(/(\\d+)\\s+results?/i, '$1 个结果').replace(/(\\d+)\\s+result/i, '$1 个结果');
+                return "已搜索 " + res;
+            });
+        }
+        // 任务状态动词：14 个分支统一合并
+        const taskVerbMatch = valNorm.match(/^(Checked|Checking|Killed|Killing|Started|Starting|Paused|Pausing|Resumed|Resuming|Created|Creating|Sent input to|Sending input to)\\s+task\\s+(.+)$/i);
+        if (taskVerbMatch) {
+            const actionKey = taskVerbMatch[1].toLowerCase();
+            const prefix = TASK_VERB_ACTIONS[actionKey] || (taskVerbMatch[1] + ' task ');
+            return prefix + translateTaskTarget(taskVerbMatch[2]);
+        }
+        if (/^Checked (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Checked (.+)$/i, (match, prefix) => {
+                let isWorking = / Working\\.\\.\\.$/i.test(prefix);
+                let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
+                let trans = translateCountList(cleanPrefix);
+                return (isWorking ? "正在检查 " : "已检查 ") + trans + (isWorking ? "..." : "");
+            });
+        }
+        if (/^Checking (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Checking (.+)$/i, (match, prefix) => {
+                return "正在检查 " + translateCountList(prefix);
+            });
+        }
+        if (/^Killed (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Killed (.+)$/i, (match, prefix) => {
+                let isWorking = / Working\\.\\.\\.$/i.test(prefix);
+                let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
+                let trans = translateCountList(cleanPrefix);
+                return (isWorking ? "正在终止 " : "已终止 ") + trans + (isWorking ? "..." : "");
+            });
+        }
+        if (/^Killing (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Killing (.+)$/i, (match, prefix) => {
+                return "正在终止 " + translateCountList(prefix);
+            });
+        }
+        if (/^Run (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Run (.+)$/i, (match, prefix) => {
+                if (/^command finished$/i.test(prefix)) return "命令执行完成";
+                if (/^task finished$/i.test(prefix)) return "任务执行完成";
+                let trans = translateCountList(prefix);
+                if (trans !== prefix) return "运行 " + trans;
+                return "运行 " + translateTaskTarget(prefix);
+            });
+        }
+        if (/^Load older messages, showing (\\d+) of (\\d+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Load older messages, showing (\\d+) of (\\d+)$/i, '加载更早的消息，当前显示 $1 / $2');
+        }
+        if (/^(\\d+) files? changed(\\s*\\+\\d+\\s*-\\d+)?$/i.test(valNorm)) {
+            return valNorm.replace(/^(\\d+) files? changed(\\s*\\+\\d+\\s*-\\d+)?$/i, (match, num, diff) => {
+                return num + " 个文件已改动" + (diff || "");
+            });
+        }
+        // 合并：subagents / tasks running
+        const subagentsMatch = valNorm.match(/^(\\d+)\\s+(subagents?\\/tasks?|subagents?|tasks?)\\s+running$/i);
+        if (subagentsMatch) {
+            const num = subagentsMatch[1];
+            const targetType = subagentsMatch[2].toLowerCase();
+            let typeCn = '个任务';
+            if (targetType.startsWith('subagent') && targetType.includes('/')) typeCn = '个子智能体/任务';
+            else if (targetType.startsWith('subagent')) typeCn = '个子智能体';
+            return num + ' ' + typeCn + '正在运行';
+        }
+        if (/^([\\d,.]+\\s+[a-zA-Z\\s]+)(?:,\\s*[\\d,.]+\\s+[a-zA-Z\\s]+)*$/i.test(valNorm)) {
+            const trans = translateCountList(valNorm);
+            if (trans !== valNorm) return trans;
+        }
+        if (/^\\+(\\d+)\\s+more\\s+lines?$/i.test(valNorm)) {
+            return valNorm.replace(/^\\+(\\d+)\\s+more\\s+lines?$/i, '+$1 行');
+        }
+        if (/^Showing\\s+(\\d+)\\s+lines?$/i.test(valNorm)) {
+            return valNorm.replace(/^Showing\\s+(\\d+)\\s+lines?$/i, '显示 $1 行');
+        }
+        if (/^Permanently delete (.+?), including (\\d+) active conversations?\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^Permanently delete (.+?), including (\\d+) active conversations?\\.?$/i, '永久删除 $1，包含 $2 个活跃会话。');
+        }
+        if (/^including (\\d+) active conversations?\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^including (\\d+) active conversations?\\.?$/i, "包含 $1 个活跃会话。");
+        }
+        if (/^All changes since (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^All changes since (.+)$/i, '自 $1 以来的所有更改');
+        }
+        if (/^All\\s+(?:scheduled tasks?|automations?)\\s+run\\s+as\\s+(.+?)\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^All\\s+(?:scheduled tasks?|automations?)\\s+run\\s+as\\s+(.+?)\\.?$/i, '所有计划任务均以 $1 模型运行。');
+        }
+        if (/^A\\s+(?:scheduled task|automation)\\s+with\\s+ID\\s+(.+?)\\s+already\\s+exists\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^A\\s+(?:scheduled task|automation)\\s+with\\s+ID\\s+(.+?)\\s+already\\s+exists\\.?$/i, 'ID 为 $1 的任务已存在。');
+        }
+        if (/^See all \\((\\d+)\\)$/i.test(valNorm)) {
+            return valNorm.replace(/^See all \\((\\d+)\\)$/i, '显示全部 ($1)');
+        }
+        if (/^Available AI Credits: (\\d+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Available AI Credits: (\\d+)$/i, '可用 AI 额度: $1');
+        }
+        if (/^Version\\s+([\\d\\.]+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Version\\s+([\\d\\.]+)$/i, '版本 $1');
+        }
+        if (/^(\\d+)(s|m|h|d|w|mo|yr)$/i.test(valNorm)) {
+            return valNorm.replace(/^(\\d+)(s|m|h|d|w|mo|yr)$/i, (match, num, unit) => {
+                const unitLower = unit.toLowerCase();
+                let unitStr = "";
+                if (unitLower === "s") unitStr = "秒前";
+                else if (unitLower === "m") unitStr = "分钟前";
+                else if (unitLower === "h") unitStr = "小时前";
+                else if (unitLower === "d") unitStr = "天前";
+                else if (unitLower === "w") unitStr = "周前";
+                else if (unitLower === "mo") unitStr = "个月前";
+                else if (unitLower === "yr") unitStr = "年前";
+                return num + unitStr;
+            });
+        }
+        if (/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i.test(valNorm)) {
+            return valNorm.replace(/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i, (match, article, type, name) => {
+                let typeStr = "项目";
+                if (type && type.toLowerCase().includes('group')) typeStr = "项目分组";
+                else if (type && type.toLowerCase() === 'workspace') typeStr = "工作区";
+                return "您确定要删除 " + typeStr + " " + name + " 吗？";
+            });
+        }
+        if (/^This will permanently delete (\\d+) active conversations? within it\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^This will permanently delete (\\d+) active conversations? within it\\.?$/i, '此操作将永久删除其中的 $1 个活跃会话。');
+        }
+        if (/^This will permanently delete (.+?) within it\\.?$/i.test(valNorm)) {
+            return valNorm.replace(/^This will permanently delete (.+?) within it\\.?$/i, '此操作将永久删除其中的 $1。');
+        }
+        if (/^(.+?): context deadline exceeded$/i.test(valNorm)) {
+            return valNorm.replace(/^(.+?): context deadline exceeded$/i, '$1: 请求超时 (context deadline exceeded)');
+        }
+        if (/^(.+?): i\\/o timeout$/i.test(valNorm)) {
+            return valNorm.replace(/^(.+?): i\\/o timeout$/i, '$1: I\\/O 超时 (i\\/o timeout)');
+        }
+        if (/^Updated (.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Updated (.+)$/i, '更新于 $1');
+        }
+        // 动态属性与控件正则
+        if (/^Plugin:\\s*(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Plugin:\\s*(.+)$/i, '插件：$1');
+        }
+        if (/^Toggle\\s+(.+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Toggle\\s+(.+)$/i, '切换 $1');
+        }
+        if (/^Enter\\s+(.+?)\\s+name\\.\\.\\.$/i.test(valNorm)) {
+            return valNorm.replace(/^Enter\\s+(.+?)\\s+name\\.\\.\\.$/i, (m, name) => {
+                const nameCn = name === 'scheduled task' ? '计划任务' : (name === 'automation' ? '自动化' : name);
+                return '输入' + nameCn + '名称...';
+            });
+        }
+        if (/^Enter a prompt for the agent to run\\.\\.\\.$/i.test(valNorm)) {
+            return '输入供智能体执行的提示词...';
+        }
+        return null;
+    }
+
+    // 通用底层字符串翻译入口（文本节点与元素属性共用）
+    function translateString(text, node) {
+        if (!text || typeof text !== 'string') return null;
+        const valNorm = norm(text);
+        if (!valNorm) return null;
+        const shortcutTrans = translateWithShortcut(valNorm);
+        if (shortcutTrans) return shortcutTrans;
+        const exactTrans = lookup(valNorm);
+        if (exactTrans) return exactTrans;
+        const dynamicTrans = translateDynamicText(valNorm, text, node);
+        if (dynamicTrans && dynamicTrans !== valNorm) return dynamicTrans;
+        return null;
+    }
+
+    // 文本节点前置门禁判断：排除禁区标签与免翻容器
     function shouldTranslateTextNode(node) {
         if (!node || node.nodeType !== Node.TEXT_NODE) return false;
         const raw = (node.nodeValue || '').trim();
@@ -349,71 +726,22 @@ function generateJs(preloadedDict) {
         const el = node.parentElement;
         if (!el || typeof el.closest !== 'function') return false;
 
-        // 分支 0：禁区标签直查（与观察器入队口径对齐：body 内联 style、svg/math 深层文本等边缘不再漏判）
+        // 排除黑名单标签
         const tag = el.tagName ? String(el.tagName).toUpperCase() : '';
         if (BLOCKED_TAGS.has(tag)) return false;
 
-        // 分支 1：绝对代码、终端、公式、用户输入与历史会话标题禁区 -> 100% 物理熔断
-        // （严禁翻译代码行、终端输出、用户自身提问气泡、自定义会话标题、代码文件标签名、Artifact 交付件标题）
-        if (el.closest(FORBIDDEN_SUBTREE_SELECTOR)) {
+        // 排除代码编辑器、终端、AI 流式正文等免翻容器
+        if (el.closest(ALL_BLOCKED_SELECTOR)) {
             return false;
         }
 
-        // 分支 2：🛡️ AI 正文、思考链推导与流式打字专属大容器 -> 100% 绝对物理熔断！
-        // 核心保障：绝对高于后续所有交互控件直通规则，绝不允许任何打字半成品与 Markdown 文本被机械翻译！
-        if (el.closest(AI_STREAM_PROSE_SELECTOR)) {
-            return false;
-        }
-
-        // 分支 3：常规 UI 与交互控件（按钮、菜单、导航、设置面板等） -> 100% 默认放行
+        // 常规 UI 元素放行翻译
         return true;
     }
 
     function translateAttrValue(v) {
-        if (!v) return null;
-        const t = norm(v);
-        const shortcutTrans = translateWithShortcut(t);
-        if (shortcutTrans) return shortcutTrans;
-        if (map.has(t)) return map.get(t);
-        const tLower = t.toLowerCase();
-        if (lowerMap.has(tLower)) return lowerMap.get(tLower);
-
-        // 动态属性正则匹配
-        if (/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i.test(t)) {
-            return t.replace(/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i, (m, type, num) => {
-                const typeCn = type.toLowerCase() === 'rules' ? '规则' : '技能';
-                return typeCn + '：' + num + ' tokens';
-            });
-        }
-        if (/^Plugin:\\s*(.+)$/i.test(t)) {
-            return t.replace(/^Plugin:\\s*(.+)$/i, '插件：$1');
-        }
-        if (/^Toggle\\s+(.+)$/i.test(t)) {
-            return t.replace(/^Toggle\\s+(.+)$/i, '切换 $1');
-        }
-        if (/^Load older messages, showing (\\d+) of (\\d+)$/i.test(t)) {
-            return t.replace(/^Load older messages, showing (\\d+) of (\\d+)$/i, '加载更早的消息，当前显示 $1 / $2');
-        }
-        if (/^\\+(\\d+)\\s+more\\s+lines?$/i.test(t)) {
-            return t.replace(/^\\+(\\d+)\\s+more\\s+lines?$/i, '+$1 行');
-        }
-        if (/^Showing\\s+(\\d+)\\s+lines?$/i.test(t)) {
-            return t.replace(/^Showing\\s+(\\d+)\\s+lines?$/i, '显示 $1 行');
-        }
-        if (/^Enter\\s+(.+?)\\s+name\\.\\.\\.$/i.test(t)) {
-            return t.replace(/^Enter\\s+(.+?)\\s+name\\.\\.\\.$/i, (m, name) => {
-                const nameCn = name === 'scheduled task' ? '计划任务' : (name === 'automation' ? '自动化' : name);
-                return '输入' + nameCn + '名称...';
-            });
-        }
-        if (/^Enter a prompt for the agent to run\\.\\.\\.$/i.test(t)) {
-            return '输入供智能体执行的提示词...';
-        }
-        if (/^([\\d,.]+\\s+[a-zA-Z\\s]+)(?:,\\s*[\\d,.]+\\s+[a-zA-Z\\s]+)*$/i.test(t)) {
-            const trans = translateCountList(t);
-            if (trans !== t) return trans;
-        }
-        return null;
+        if (!v || typeof v !== 'string') return null;
+        return translateString(v, null);
     }
 
     function translateElementAttrs(node) {
@@ -427,17 +755,18 @@ function generateJs(preloadedDict) {
         }
     }
 
-    // ⚡【DOM 原生属性 Setter 拦截器（0 毫秒透明拦截）】：
-    // 无论是 React 虚拟 DOM 提交、还是 Monaco 编辑器鼠标悬停时动态执行 el.title = 'Add inline comment'
-    // 或 el.setAttribute('title', 'Add inline comment')，统统在写入的第 0 毫秒瞬间调包为中文！
+    // 原生属性 Setter 拦截器：拦截动态属性赋值，即时完成属性汉化
     try {
         if (typeof Element !== 'undefined' && Element.prototype) {
             const origSetAttr = Element.prototype.setAttribute;
             const INTERCEPT_ATTRS = new Set(['title', 'aria-label', 'placeholder', 'data-tooltip', 'data-tip', 'data-title', 'data-balloon']);
             Element.prototype.setAttribute = function(name, value) {
                 if (typeof value === 'string' && INTERCEPT_ATTRS.has(name)) {
-                    const trans = translateAttrValue(value);
-                    if (trans) value = trans;
+                    // 已是中文则直接跳过，避免重复处理
+                    if (!/[\\u4e00-\\u9fa5]/.test(value)) {
+                        const trans = translateAttrValue(value);
+                        if (trans) value = trans;
+                    }
                 }
                 return origSetAttr.call(this, name, value);
             };
@@ -448,7 +777,7 @@ function generateJs(preloadedDict) {
             if (origTitleDesc && origTitleDesc.set) {
                 Object.defineProperty(HTMLElement.prototype, 'title', {
                     set: function(val) {
-                        if (typeof val === 'string') {
+                        if (typeof val === 'string' && !/[\\u4e00-\\u9fa5]/.test(val)) {
                             const trans = translateAttrValue(val);
                             if (trans) val = trans;
                         }
@@ -479,468 +808,45 @@ function generateJs(preloadedDict) {
 
             const valNorm = norm(originalVal);
 
-            // 🛡️ 物理保护 1：文件路径、代码文件名、网址URL、UUID/Hash与命令行
+            // 文本物理特征防御：过滤文件路径、代码文件名、网址URL、UUID/Hash与命令行参数
             if (/^(https?:\\/\\/|[a-zA-Z]:[\\\\/]|[\\\\/][a-zA-Z0-9_.-]|\\.[\\\\/]|\\.\\.[\\\\/])/.test(valNorm)) return;
             if (/^[a-zA-Z0-9_\\-.]+\\.(js|ts|jsx|tsx|json|py|go|rs|cpp|c|h|hpp|java|kt|dart|html|css|scss|md|mdx|yaml|yml|toml|xml|sql|sh|bat|ps1|asar|exe|dll|zip|tar|gz|png|jpg|svg|ico)$/i.test(valNorm)) return;
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valNorm)) return;
+            if (/^[0-9a-f]{7,40}$/i.test(valNorm)) return;
+            if (/^--?[a-zA-Z0-9_\\-]+(=.*)?$/.test(valNorm)) return;
 
-            // 🛡️ 物理保护 2：纯代码行/函数调用特征（放行动作步骤标题，如 Ran node ...）
+            // 纯代码语法特征过滤：放行动作步骤标题（如 Ran node ...），跳过代码调用特征
             if (!/^(Ran|Running|Explored|Analyzed|Searched|Edited|Thought for|Worked for|Checked|Killed|Starting|Started|Timed|Status|The command exited|Verify|Commit)\\b/i.test(valNorm)) {
                 if (/[a-zA-Z0-9_$]+\\.[a-zA-Z0-9_$]+\\(/.test(valNorm) || /^[a-zA-Z0-9_$]+\\(.*\\)$/.test(valNorm)) return;
             }
 
-            let newVal = originalVal;
-            const valLower = valNorm.toLowerCase();
-            
-            // 1. 精确匹配（含大小写自动纠正与快捷键检测）
-            const shortcutTrans = translateWithShortcut(valNorm);
-            if (shortcutTrans) {
-                    newVal = shortcutTrans;
-                } else if (map.has(valNorm)) {
-                    newVal = map.get(valNorm);
-                } else if (lowerMap.has(valLower)) {
-                    newVal = lowerMap.get(valLower);
-                                } else if (/^Refreshes in (.+?)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Refreshes in (.+?)$/i, (match, timeStr) => {
-                        let tTrans = timeStr.trim()
-                            .replace(/(\\d+)\\s*days?/gi, '$1 天')
-                            .replace(/(\\d+)\\s*hours?/gi, '$1 小时')
-                            .replace(/(\\d+)\\s*minutes?/gi, '$1 分钟')
-                            .replace(/(\\d+)\\s*seconds?/gi, '$1 秒')
-                            .replace(/,\\s*/g, ' ')
-                            .replace(/\\s+/g, ' ');
-                        return tTrans + "后刷新";
-                    });
-                } else if (/^You have used some of your (.+?) limit, it will fully refresh in (.+?)\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^You have used some of your (.+?) limit, it will fully refresh in (.+?)\\.?$/i, (match, limitType, timeStr) => {
-                        let lType = limitType.trim().toLowerCase();
-                        let lTrans = limitType.trim();
-                        if (lType === 'weekly') lTrans = '每周';
-                        else if (lType === 'daily') lTrans = '每日';
-                        else if (lType === 'monthly') lTrans = '每月';
-                        else if (lType.includes('5-hour') || lType.includes('5 hour')) lTrans = '5 小时';
-                        else {
-                            lTrans = lType.replace(/(\\d+)-hour/g, '$1 小时').replace(/(\\d+)\\s*hours?/g, '$1 小时');
-                        }
-                        
-                        let tTrans = timeStr.trim()
-                            .replace(/(\\d+)\\s*days?/gi, '$1 天')
-                            .replace(/(\\d+)\\s*hours?/gi, '$1 小时')
-                            .replace(/(\\d+)\\s*minutes?/gi, '$1 分钟')
-                            .replace(/(\\d+)\\s*seconds?/gi, '$1 秒')
-                            .replace(/,\\s*/g, ' ')
-                            .replace(/\\s+/g, ' ');
-                            
-                        let prefix = "您已使用了部分";
-                        if (lTrans === "每周" || lTrans === "每日" || lTrans === "每月") {
-                            prefix += lTrans;
-                        } else {
-                            prefix += " " + lTrans;
-                        }
-                        return prefix + "限制，将在 " + tTrans + "后完全刷新。";
-                    });
-                } else if (/^Learn more about (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Learn more about (.+)$/i, (match, p) => {
-                        // 优先查字典（单一数据源：preset 译文与字典保持一致）；
-                        // 字典未命中时再按已知 preset 规则兜底（inherit 类为子串匹配，字典整键无法覆盖）
-                        const pNorm = norm(p);
-                        const pLower = pNorm.toLowerCase();
-                        let trans = null;
-                        if (map.has(pNorm)) trans = map.get(pNorm);
-                        else if (lowerMap.has(pLower)) trans = lowerMap.get(pLower);
-                        if (trans) return "了解更多关于 " + trans;
-                        let translatedPreset = p;
-                        if (pLower.includes('inherit general')) translatedPreset = "继承通用设置 (Inherit General)";
-                        else if (pLower.includes('inherit project')) translatedPreset = "继承项目设置 (Inherit Project)";
-                        else if (pLower.includes('inherit global')) translatedPreset = "继承全局设置 (Inherit Global)";
-                        return "了解更多关于 " + translatedPreset;
-                    });
-                } else if (/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i, (m, num, unit) => {
-                        let uCn = '秒';
-                        const uLower = unit.toLowerCase();
-                        if (uLower.startsWith('m') && !uLower.startsWith('ms')) uCn = '分钟';
-                        else if (uLower.startsWith('h')) uCn = '小时';
-                        else if (uLower === 'ms') uCn = '毫秒';
-                        return '计时 ' + num + ' ' + uCn;
-                    });
-                } else if (/^Status:\\s*(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Status:\\s*(.+)$/i, (m, st) => {
-                        const stNorm = norm(st);
-                        let stCn = map.get(stNorm) || lowerMap.get(stNorm.toLowerCase()) || st;
-                        if (stNorm.toLowerCase() === 'fired') stCn = '已触发';
-                        else if (stNorm.toLowerCase() === 'running') stCn = '运行中';
-                        else if (stNorm.toLowerCase() === 'completed') stCn = '已完成';
-                        else if (stNorm.toLowerCase() === 'cancelled') stCn = '已取消';
-                        else if (stNorm.toLowerCase() === 'failed') stCn = '失败';
-                        return '状态：' + stCn;
-                    });
-                } else if (/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i, (m, code, out) => {
-                        if (out !== undefined) {
-                            return '命令已退出，退出码 ' + code + '。输出：' + out;
-                        }
-                        return '命令已退出，退出码 ' + code;
-                    });
-                } else if (/^(.+?)\\s+finished$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(.+?)\\s+finished$/i, (m, prefix) => {
-                        const pNorm = norm(prefix);
-                        const pCn = map.get(pNorm) || lowerMap.get(pNorm.toLowerCase()) || prefix;
-                        return pCn + ' 已完成';
-                    });
-                } else if (/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, count, branch) => {
-                        if (branch) return '提交 ' + count + ' 个文件更改至 ' + branch;
-                        return '提交 ' + count + ' 个文件更改至';
-                    });
-                } else if (/^file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, branch) => {
-                        if (branch) return '个文件更改至 ' + branch;
-                        return '个文件更改至';
-                    });
-                } else if (valNorm.toLowerCase() === 'to') {
-                    const pText = (node.parentElement ? node.parentElement.textContent : '') || '';
-                    if (/master|main|branch|changes|commit|更改|提交/i.test(pText)) {
-                        newVal = originalVal.replace(/\\bto\\b/i, '至');
-                    }
-                } else if (/^Inherits your (.+?) settings(.*)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Inherits your (.+?) settings(.*)$/i, (match, cat, rest) => {
-                        let cLower = cat.toLowerCase().trim();
-                        let catTrans = cat;
-                        if (cLower === 'general') catTrans = '通用';
-                        else if (cLower === 'project') catTrans = '项目';
-                        else if (cLower === 'global') catTrans = '全局';
-                        let restTrans = rest ? rest.trim() : '';
-                        if (restTrans.includes('effective in this project') || restTrans.includes('在此项目中生效')) {
-                            restTrans = ' (在此项目中生效)。';
-                        } else if (/^when working in this project\\.?$/i.test(restTrans)) {
-                            restTrans = '（在此项目中工作时）';
-                        } else if (restTrans) {
-                            restTrans = ' ' + restTrans;
-                        }
-                        return "继承您的" + catTrans + "设置" + restTrans;
-                    });
-                } else if (/^(\\d+)% of the customization budget is available\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+)% of the customization budget is available\\.?$/i, (match, num) => {
-                        return num + "% 的定制预算可用。";
-                    });
-                } else if (/^Send feedback as (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Send feedback as (.+)$/i, (match, addr) => {
-                        return "以 " + addr + " 身份发送反馈";
-                    });
-                } else if (/^Your Plan:\\s*(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Your Plan:\\s*(.+)$/i, (match, plan) => {
-                        return "您的计划：" + plan;
-                    });
-                } else if (/^Yes, and always allow '(.+)' in this project$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Yes, and always allow '(.+)' in this project$/i, (match, cmd) => {
-                        return "是，且在此项目中始终允许运行 '" + cmd + "'";
-                    });
-                } else if (/^Yes, and always allow '(.+)'$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Yes, and always allow '(.+)'$/i, (match, cmd) => {
-                        return "是，且始终允许运行 '" + cmd + "'";
-                    });
-                } else if (/^(\\d+) tools? enabled$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+) tools? enabled$/i, (match, num) => {
-                        return num + " 个工具已启用";
-                    });
-                } else if (/^Show (\\d+) more(\\.\\.\\.|…)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Show (\\d+) more(\\.\\.\\.|…)?$/i, (match, num) => {
-                        return "显示另外 " + num + " 个...";
-                    });
-                } else if (/^Show (\\d+) breakdowns?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Show (\\d+) breakdowns?$/i, (match, num) => {
-                        return "显示 " + num + " 个细目";
-                    });
-                } else if (/^Hide (\\d+) breakdowns?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Hide (\\d+) breakdowns?$/i, (match, num) => {
-                        return "隐藏 " + num + " 个细目";
-                    });
-                } else if (/^Show all (\\d+) breakdowns?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Show all (\\d+) breakdowns?$/i, (match, num) => {
-                        return "显示全部 " + num + " 个细目";
-                    });
-                } else if (/^Hide all (\\d+) breakdowns?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Hide all (\\d+) breakdowns?$/i, (match, num) => {
-                        return "隐藏全部 " + num + " 个细目";
-                    });
-                } else if (/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(Rules|Skills):\\s*([\\d,]+)\\s*tokens$/i, (m, type, num) => {
-                        const t = type.toLowerCase() === 'rules' ? '规则' : '技能';
-                        return t + '：' + num + ' tokens';
-                    });
-                } else if (/^Media \\((Today|Yesterday)\\s+(\\d{1,2}:\\d{2})\\s*(AM|PM)?\\)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Media \\((Today|Yesterday)\\s+(\\d{1,2}:\\d{2})\\s*(AM|PM)?\\)$/i, (m, day, time, ap) => {
-                        const d = day.toLowerCase() === 'today' ? '今天' : '昨天';
-                        return '媒体 (' + d + ' ' + time + (ap ? ' ' + ap : '') + ')';
-                    });
-                } else if (/^Select model, current: (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Select model, current: (.+)$/i, (m, model) => {
-                        return '选择模型，当前：' + model;
-                    });
-                } else if (/^Refresh (MCP servers|quota and credits data)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Refresh (MCP servers|quota and credits data)$/i, (m, t) => {
-                        if (t.toLowerCase() === 'mcp servers') return '刷新 MCP 服务器';
-                        return '刷新配额与额度数据';
-                    });
-                } else if (/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i, (match, lang) => {
-                        let translatedLang = lang;
-                        if (lang.toLowerCase() === 'dart and flutter') translatedLang = "Dart 和 Flutter";
-                        return "提供为 " + translatedLang + " 的顺畅 (Happy Path) 开发流程量身定制的技能指令。";
-                    });
-                } else if (/^Worked for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Worked for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
-                        return "已工作 " + num + " " + unitToCn(unit);
-                    });
-                } else if (/^Working for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Working for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
-                        return "已工作 " + num + " " + unitToCn(unit);
-                    });
-                } else if (/^Thinking \\(?(\\d+)(s|m|h|d|w|mo|yr)?\\)?(\\.{1,3}|…)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Thinking \\(?(\\d+)(s|m|h|d|w|mo|yr)?\\)?(\\.{1,3}|…)?$/i, (match, num, unit, dots) => {
-                        return "思考中 (" + num + " " + unitToCn(unit) + ")" + (dots || "…");
-                    });
-                } else if (/^Waiting for (.+?)(\\.{1,3}|…)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Waiting for (.+?)(\\.{1,3}|…)?$/i, (match, target, dots) => {
-                        let t = target.trim().toLowerCase();
-                        let trans = target;
-                        if (t === 'input') trans = "输入";
-                        else if (t === 'user') trans = "用户";
-                        else if (t === 'tool' || t === 'tools') trans = "工具";
-                        else if (t === 'agent' || t === 'agents') trans = "智能体";
-                        return "等待 " + trans + " 中...";
-                    });
-                } else if (/^Thinking for (\\d+)(s|m|h|d|w|mo|yr)?(\\.{0,3}|…)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Thinking for (\\d+)(s|m|h|d|w|mo|yr)?(\\.{0,3}|…)?$/i, (match, num, unit, dots) => {
-                        return "已思考 " + num + " " + unitToCn(unit) + (dots || "");
-                    });
-                } else if (/^Running for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Running for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
-                        return "已运行 " + num + " " + unitToCn(unit);
-                    });
-                } else if (/^Executing for (\\d+)(s|m|h|d|w|mo|yr)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Executing for (\\d+)(s|m|h|d|w|mo|yr)?$/i, (match, num, unit) => {
-                        return "已执行 " + num + " " + unitToCn(unit);
-                    });
-                } else if (/^Thought for (\\d+)(s|m|h)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Thought for (\\d+)(s|m|h)?$/i, (match, num, unit) => {
-                        return "思考了 " + num + " " + unitToCn(unit);
-                    });
-                // 动词步骤摘要（Explored/Analyzed/Edited/Created/Deleted/Searching）不设引擎整句支路：
-                // 字典动作词精确匹配 + 分片计数（官方 UI 将动作词与计数拆成独立文本节点）是唯一机制，避免双重翻译
-                } else if (/^(?:Ran|Running)\\s+(\\d+)\\s+commands?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(Ran|Running)\\s+(\\d+)\\s+commands?$/i, (m, verb, num) => {
-                        return (verb.toLowerCase() === 'running' ? "正在运行 " : "已运行 ") + num + " 条命令";
-                    });
-                } else if (/^Ran\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Ran\\s+(.+)$/i, (match, prefix) => {
-                        let isWorking = / Working\\.\\.\\.$/i.test(prefix);
-                        let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanPrefix);
-                        return (isWorking ? "正在执行 " : "已执行 ") + trans + (isWorking ? " 正在处理..." : "");
-                    });
-                } else if (/^Searched\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Searched\\s+(.+)$/i, (match, body) => {
-                        let res = body.replace(/(\\d+)\\s+results?/i, '$1 个结果').replace(/(\\d+)\\s+result/i, '$1 个结果');
-                        return "已搜索 " + res;
-                    });
-                } else if (/^Checked task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Checked task\\s+(.+)$/i, (match, target) => {
-                        return "已检查任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Checking task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Checking task\\s+(.+)$/i, (match, target) => {
-                        return "正在检查任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Killed task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Killed task\\s+(.+)$/i, (match, target) => {
-                        return "已终止任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Killing task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Killing task\\s+(.+)$/i, (match, target) => {
-                        return "正在终止任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Started task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Started task\\s+(.+)$/i, (match, target) => {
-                        return "已启动任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Starting task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Starting task\\s+(.+)$/i, (match, target) => {
-                        return "正在启动任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Paused task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Paused task\\s+(.+)$/i, (match, target) => {
-                        return "已暂停任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Pausing task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Pausing task\\s+(.+)$/i, (match, target) => {
-                        return "正在暂停任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Resumed task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Resumed task\\s+(.+)$/i, (match, target) => {
-                        return "已恢复任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Resuming task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Resuming task\\s+(.+)$/i, (match, target) => {
-                        return "正在恢复任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Created task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Created task\\s+(.+)$/i, (match, target) => {
-                        return "已创建任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Creating task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Creating task\\s+(.+)$/i, (match, target) => {
-                        return "正在创建任务 " + translateTaskTarget(target);
-                    });
-                } else if (/^Sent input to task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Sent input to task\\s+(.+)$/i, (match, target) => {
-                        return "已向任务发送输入 " + translateTaskTarget(target);
-                    });
-                } else if (/^Sending input to task\\s+(.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Sending input to task\\s+(.+)$/i, (match, target) => {
-                        return "正在向任务发送输入 " + translateTaskTarget(target);
-                    });
-                } else if (/^Checked (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Checked (.+)$/i, (match, prefix) => {
-                        let isWorking = / Working\\.\\.\\.$/i.test(prefix);
-                        let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanPrefix);
-                        return (isWorking ? "正在检查 " : "已检查 ") + trans + (isWorking ? "..." : "");
-                    });
-                } else if (/^Checking (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Checking (.+)$/i, (match, prefix) => {
-                        let trans = translateCountList(prefix);
-                        return "正在检查 " + trans;
-                    });
-                } else if (/^Killed (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Killed (.+)$/i, (match, prefix) => {
-                        let isWorking = / Working\\.\\.\\.$/i.test(prefix);
-                        let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
-                        let trans = translateCountList(cleanPrefix);
-                        return (isWorking ? "正在终止 " : "已终止 ") + trans + (isWorking ? "..." : "");
-                    });
-                } else if (/^Killing (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Killing (.+)$/i, (match, prefix) => {
-                        let trans = translateCountList(prefix);
-                        return "正在终止 " + trans;
-                    });
-                } else if (/^Run (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Run (.+)$/i, (match, prefix) => {
-                        if (/^command finished$/i.test(prefix)) return "命令执行完成";
-                        if (/^task finished$/i.test(prefix)) return "任务执行完成";
-                        let trans = translateCountList(prefix);
-                        if (trans !== prefix) return "运行 " + trans;
-                        let target = translateTaskTarget(prefix);
-                        return "运行 " + target;
-                    });
-                } else if (/^Load older messages, showing (\\d+) of (\\d+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Load older messages, showing (\\d+) of (\\d+)$/i, '加载更早的消息，当前显示 $1 / $2');
-                } else if (/^(\\d+) files? changed(\\s*\\+\\d+\\s*-\\d+)?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+) files? changed(\\s*\\+\\d+\\s*-\\d+)?$/i, (match, num, diff) => {
-                        let diffStr = diff || "";
-                        return num + " 个文件已改动" + diffStr;
-                    });
-                } else if (/^(\\d+)\\s+subagents?\\/tasks?\\s+running$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+)\\s+subagents?\\/tasks?\\s+running$/i, '$1 个子智能体/任务正在运行');
-                } else if (/^(\\d+)\\s+subagents?\\s+running$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+)\\s+subagents?\\s+running$/i, '$1 个子智能体正在运行');
-                } else if (/^(\\d+)\\s+tasks?\\s+running$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+)\\s+tasks?\\s+running$/i, '$1 个任务正在运行');
-                } else if (/^([\\d,.]+\\s+[a-zA-Z\\s]+)(?:,\\s*[\\d,.]+\\s+[a-zA-Z\\s]+)*$/i.test(valNorm) && translateCountList(valNorm) !== valNorm) {
-                    newVal = translateCountList(valNorm);
-                } else if (/^\\+(\\d+)\\s+more\\s+lines?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^\\+(\\d+)\\s+more\\s+lines?$/i, '+$1 行');
-                } else if (/^Showing\\s+(\\d+)\\s+lines?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Showing\\s+(\\d+)\\s+lines?$/i, '显示 $1 行');
-                } else if (/^Permanently delete (.+?), including (\\d+) active conversations?\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Permanently delete (.+?), including (\\d+) active conversations?\\.?$/i, (match, proj, count) => {
-                        return "永久删除 " + proj + "，包含 " + count + " 个活跃会话。";
-                    });
-                } else if (/^including (\\d+) active conversations?\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^including (\\d+) active conversations?\\.?$/i, "包含 $1 个活跃会话。");
-                } else if (/^All changes since (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^All changes since (.+)$/i, '自 $1 以来的所有更改');
-                } else if (/^All\\s+(?:scheduled tasks?|automations?)\\s+run\\s+as\\s+(.+?)\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^All\\s+(?:scheduled tasks?|automations?)\\s+run\\s+as\\s+(.+?)\\.?$/i, '所有计划任务均以 $1 模型运行。');
-                } else if (/^A\\s+(?:scheduled task|automation)\\s+with\\s+ID\\s+(.+?)\\s+already\\s+exists\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^A\\s+(?:scheduled task|automation)\\s+with\\s+ID\\s+(.+?)\\s+already\\s+exists\\.?$/i, 'ID 为 $1 的任务已存在。');
-                } else if (/^See all \\((\\d+)\\)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^See all \\((\\d+)\\)$/i, (match, num) => {
-                        return "显示全部 (" + num + ")";
-                    });
-                } else if (/^Available AI Credits: (\\d+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Available AI Credits: (\\d+)$/i, (match, num) => {
-                        return "可用 AI 额度: " + num;
-                    });
-                } else if (/^Version\\s+([\\d\\.]+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Version\\s+([\\d\\.]+)$/i, (match, v) => {
-                        return "版本 " + v;
-                    });
-                } else if (/^(\\d+)(s|m|h|d|w|mo|yr)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(\\d+)(s|m|h|d|w|mo|yr)$/i, (match, num, unit) => {
-                        const unitLower = unit.toLowerCase();
-                        let unitStr = "";
-                        if (unitLower === "s") unitStr = "秒前";
-                        else if (unitLower === "m") unitStr = "分钟前";
-                        else if (unitLower === "h") unitStr = "小时前";
-                        else if (unitLower === "d") unitStr = "天前";
-                        else if (unitLower === "w") unitStr = "周前";
-                        else if (unitLower === "mo") unitStr = "个月前";
-                        else if (unitLower === "yr") unitStr = "年前";
-                        return num + unitStr;
-                    });
-                } else if (/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i, (match, article, type, name) => {
-                        let typeStr = "项目";
-                        if (type && type.toLowerCase().includes('group')) typeStr = "项目分组";
-                        else if (type && type.toLowerCase() === 'workspace') typeStr = "工作区";
-                        return "您确定要删除 " + typeStr + " " + name + " 吗？";
-                    });
-                } else if (/^This will permanently delete (\\d+) active conversations? within it\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^This will permanently delete (\\d+) active conversations? within it\\.?$/i, (match, count) => {
-                        return "此操作将永久删除其中的 " + count + " 个活跃会话。";
-                    });
-                } else if (/^This will permanently delete (.+?) within it\\.?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^This will permanently delete (.+?) within it\\.?$/i, (match, target) => {
-                        return "此操作将永久删除其中的 " + target + "。";
-                    });
-                } else if (/^(.+?): context deadline exceeded$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(.+?): context deadline exceeded$/i, (match, prefix) => {
-                        return prefix + ": 请求超时 (context deadline exceeded)";
-                    });
-                } else if (/^(.+?): i\\/o timeout$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^(.+?): i\\/o timeout$/i, (match, prefix) => {
-                        return prefix + ": I\\/O 超时 (i\\/o timeout)";
-                    });
-                } else if (/^Updated (.+)$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Updated (.+)$/i, "更新于 $1");
-                }
+            const transRes = translateString(valNorm, node);
+            const newVal = transRes || originalVal;
 
-                let leadingWs = originalVal.startsWith(' ') ? ' ' : '';
-                let trailingWs = originalVal.endsWith(' ') ? ' ' : '';
-                if (!leadingWs && node.parentElement && (node.parentElement.className || '').includes('opacity-70')) {
-                    const pBtn = node.parentElement.closest('button[data-testid="model-selector-trigger"]');
-                    if (pBtn) leadingWs = ' ';
+            let leadingWs = originalVal.startsWith(' ') ? ' ' : '';
+            let trailingWs = originalVal.endsWith(' ') ? ' ' : '';
+            if (!leadingWs && node.parentElement && (node.parentElement.className || '').includes('opacity-70')) {
+                const pBtn = node.parentElement.closest('button[data-testid="model-selector-trigger"]');
+                if (pBtn) leadingWs = ' ';
+            }
+            const finalVal = leadingWs + newVal + trailingWs;
+            if (finalVal !== originalVal) {
+                translatedValues.set(node, finalVal);
+                isMutating = true;
+                try {
+                    node.nodeValue = finalVal;
+                } finally {
+                    isMutating = false;
                 }
-                const finalVal = leadingWs + newVal + trailingWs;
-                if (finalVal !== originalVal) {
-                    translatedValues.set(node, finalVal);
-                    isMutating = true;
-                    try {
-                        node.nodeValue = finalVal;
-                    } finally {
-                        isMutating = false;
-                    }
-                } else if (/[a-zA-Z]/.test(valNorm)) {
-                    if (!/^#L\\d+(-\\d+)?$/i.test(valNorm)) {
-                        if (missedTexts.size < MISSED_TEXTS_MAX) missedTexts.add(valNorm);
-                    }
+            } else if (/[a-zA-Z]/.test(valNorm)) {
+                if (!/^#L\\d+(-\\d+)?$/i.test(valNorm)) {
+                    if (missedTexts.size < MISSED_TEXTS_MAX) missedTexts.add(valNorm);
                 }
+            }
         } catch (e) {}
     }
 
-    // 高效子树遍历：使用浏览器原生 C++ TreeWalker，极速非阻塞扫描所有文本节点
+    // 子树遍历：使用浏览器原生 TreeWalker 扫描文本节点与属性
     function translateSubtree(root) {
         if (!root) return;
         if (root.nodeType === Node.TEXT_NODE) {
@@ -950,9 +856,8 @@ function generateJs(preloadedDict) {
         if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
 
         if (root.nodeType === Node.ELEMENT_NODE) {
-            // 🚪 根节点前置物理熔断大门禁：若当前子树本身位于核心禁区或 AI 正文内，全树瞬间跳过！
-            if (typeof root.closest === 'function' && 
-                root.closest(FORBIDDEN_SUBTREE_SELECTOR + ', ' + AI_STREAM_PROSE_SELECTOR)) {
+            // 根节点前置门禁：若目标子树位于禁区容器内则直接跳过扫描
+            if (typeof root.closest === 'function' && root.closest(ALL_BLOCKED_SELECTOR)) {
                 return;
             }
             translateElementAttrs(root);
@@ -965,26 +870,21 @@ function generateJs(preloadedDict) {
             }
         }
 
-        // 🚀【父级直接切断向下扫描器（绝对零回溯）】：单向前向单向流水线
-        // 核心铁律：不回溯父级，而是在遇到安全禁区的“父级”节点时，直接 FILTER_REJECT 切断向下扫描！
-        // 内部成千上万行代码 0 次深入、0 次触碰；合法的常规 UI 节点向下深入时顺带翻译自身属性，到达叶子文本纯粹直通！
+        // TreeWalker 过滤器：自顶向下遍历，遇到禁区标签或容器直接 REJECT 整树跳过
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
             acceptNode: function(n) {
                 if (n.nodeType === Node.ELEMENT_NODE) {
                     const tag = n.tagName ? n.tagName.toUpperCase() : '';
-                    if (BLOCKED_TAGS.has(tag)) return NodeFilter.FILTER_REJECT; // 🛑 标签级父级一刀切断
-                    if (typeof n.matches === 'function') {
-                        if (n.matches(FORBIDDEN_SUBTREE_SELECTOR) || n.matches(AI_STREAM_PROSE_SELECTOR)) {
-                            return NodeFilter.FILTER_REJECT; // 🛑 核心铁律：在安全区“父级”切断向下扫描！整树丢弃，绝不深入！
-                        }
+                    if (BLOCKED_TAGS.has(tag)) return NodeFilter.FILTER_REJECT;
+                    if (typeof n.matches === 'function' && n.matches(ALL_BLOCKED_SELECTOR)) {
+                        return NodeFilter.FILTER_REJECT;
                     }
-                    // ✅ 走到这里的都是经过父级门禁检验的合法常规 UI 元素：顺带翻译当前元素自身属性（无 querySelector，无 closest 回溯）
                     translateElementAttrs(n);
-                    return NodeFilter.FILTER_SKIP; // 跳过当前元素自身，继续向下扫描合法的常规子元素
+                    return NodeFilter.FILTER_SKIP;
                 }
                 if (n.nodeType === Node.TEXT_NODE) {
                     if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-                    return NodeFilter.FILTER_ACCEPT; // ✅ 合法常规 UI 叶子文本，0 次向上回溯，绝对纯粹直通！
+                    return NodeFilter.FILTER_ACCEPT;
                 }
                 return NodeFilter.FILTER_SKIP;
             }
@@ -992,12 +892,12 @@ function generateJs(preloadedDict) {
 
         let curr = walker.nextNode();
         while (curr) {
-            translateTextNode(curr, true); // 纯粹直通，0 次向上爬楼梯回溯
+            translateTextNode(curr, true);
             curr = walker.nextNode();
         }
     }
 
-    // 暴露未命中采集结果：调用 window.__AG_DUMP_MISSING__() 输出并返回未翻译文案列表
+    // 导出未命中采集结果：供 CDP 自动化脚本调用导出
     window.__AG_MISSED_TEXTS__ = missedTexts;
     window.__AG_DUMP_MISSING__ = function() {
         const arr = Array.from(missedTexts).sort();
@@ -1005,7 +905,7 @@ function generateJs(preloadedDict) {
         return arr;
     };
 
-    // 时间切片队列：大批量 DOM 变动时拆分为微小批次在空闲帧执行，确保 60fps 零卡顿
+    // 变动任务调度队列：大批量 DOM 变动时推入 requestIdleCallback 分片执行
     let pendingQueue = [];
     let isFlushScheduled = false;
     function scheduleFlush() {
@@ -1039,7 +939,7 @@ function generateJs(preloadedDict) {
                     if (n.nodeType === Node.ELEMENT_NODE) {
                         const tag = n.tagName ? n.tagName.toUpperCase() : '';
                         if (BLOCKED_TAGS.has(tag)) continue;
-                        if (typeof n.closest === 'function' && (n.closest(FORBIDDEN_SUBTREE_SELECTOR) || n.closest(AI_STREAM_PROSE_SELECTOR))) continue;
+                        if (typeof n.closest === 'function' && n.closest(ALL_BLOCKED_SELECTOR)) continue;
                     } else if (n.nodeType === Node.TEXT_NODE) {
                         if (!shouldTranslateTextNode(n)) continue;
                     }
@@ -1058,10 +958,8 @@ function generateJs(preloadedDict) {
             } else if (m.type === 'attributes') {
                 const target = m.target;
                 if (target && target.nodeType === Node.ELEMENT_NODE) {
-                    if (typeof target.closest === 'function') {
-                        if (target.closest(FORBIDDEN_SUBTREE_SELECTOR + ', ' + AI_STREAM_PROSE_SELECTOR)) {
-                            continue;
-                        }
+                    if (typeof target.closest === 'function' && target.closest(ALL_BLOCKED_SELECTOR)) {
+                        continue;
                     }
                     translateElementAttrs(target);
                 }
@@ -1189,9 +1087,6 @@ function norm(s) {
     return s.replace(/\\s+/g, ' ').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').trim();
 }
 
-// 动态规则边界约定：主进程仅覆盖静态菜单/托盘/对话框文案与少量高频动态句式；
-// 富动态文案（计数、时长、状态机句式等）由渲染层 DOM 引擎（generateJs）权威处理，
-// 两处清单无需强行对齐——新增动态文案默认只加渲染层。
 function translateText(text) {
     if (!text || typeof text !== 'string') return text;
     const n = norm(text);
@@ -1216,7 +1111,8 @@ function translateText(text) {
     return text;
 }
 
-function translateMenu(items) {
+// 统一菜单与模板翻译函数（消除 translateMenu 与 translateTemplate 结构重复）
+function translateMenuItems(items) {
     if (!Array.isArray(items)) return;
     for (const item of items) {
         if (!item) continue;
@@ -1241,42 +1137,16 @@ function translateMenu(items) {
         }
         if (item.submenu) {
             if (Array.isArray(item.submenu.items)) {
-                translateMenu(item.submenu.items);
+                translateMenuItems(item.submenu.items);
             } else if (Array.isArray(item.submenu)) {
-                translateMenu(item.submenu);
+                translateMenuItems(item.submenu);
             }
         }
     }
 }
 
-function translateTemplate(template) {
-    if (!Array.isArray(template)) return;
-    for (const item of template) {
-        if (!item) continue;
-        let label = item.label || '';
-        if (label && typeof label === 'string') {
-            let mnemonic = '';
-            let cleanLabel = label;
-            const m = label.match(/&([a-zA-Z])/);
-            if (m) {
-                mnemonic = "(&" + m[1] + ")";
-                cleanLabel = label.replace('&', '');
-            }
-            const translated = translateText(cleanLabel);
-            if (translated && translated !== cleanLabel) {
-                item.label = translated + mnemonic;
-            } else {
-                const transRaw = translateText(label);
-                if (transRaw && transRaw !== label) {
-                    item.label = transRaw;
-                }
-            }
-        }
-        if (item.submenu && Array.isArray(item.submenu)) {
-            translateTemplate(item.submenu);
-        }
-    }
-}
+const translateMenu = translateMenuItems;
+const translateTemplate = translateMenuItems;
 
 function translateDialogOptions(opts) {
     if (!opts || typeof opts !== 'object') return;
@@ -1297,67 +1167,55 @@ function translateDialogOptions(opts) {
     }
 }
 
+function safePatch(obj, key, fn) {
+    try {
+        if (!obj) return;
+        const orig = obj[key];
+        if (typeof orig !== 'function') return;
+        const wrapped = fn(orig);
+        try { obj[key] = wrapped; } catch(_) {
+            try { Object.defineProperty(obj, key, { value: wrapped, writable: true, configurable: true }); } catch(_2) {}
+        }
+    } catch(e) {}
+}
+
 // -------------------------------------------------------------
 // 1. Hook Native Menu APIs (safe patch: 兼容只读属性，防止主进程启动崩溃)
 // -------------------------------------------------------------
-(function(){
-    function safePatch(obj, key, fn) {
-        try {
-            const orig = obj[key];
-            if (typeof orig !== 'function') return;
-            const wrapped = fn(orig);
-            try { obj[key] = wrapped; } catch(_) {
-                try { Object.defineProperty(obj, key, { value: wrapped, writable: true, configurable: true }); } catch(_2) {}
-            }
-        } catch(e) {}
-    }
-    if (electron.Menu) {
-        safePatch(electron.Menu, 'setApplicationMenu', function(origSetAppMenu) {
-            return function(menu) {
-                if (menu && menu.items) { try { translateMenu(menu.items); } catch(e) {} }
-                return origSetAppMenu.call(this, menu);
-            };
-        });
-        safePatch(electron.Menu, 'buildFromTemplate', function(origBuildFromTemplate) {
-            return function(template) {
-                if (Array.isArray(template)) { try { translateTemplate(template); } catch(e) {} }
-                const menu = origBuildFromTemplate.call(this, template);
-                if (menu && menu.items) { try { translateMenu(menu.items); } catch(e) {} }
-                return menu;
-            };
-        });
-    }
-})();
+if (electron.Menu) {
+    safePatch(electron.Menu, 'setApplicationMenu', function(origSetAppMenu) {
+        return function(menu) {
+            if (menu && menu.items) { try { translateMenuItems(menu.items); } catch(e) {} }
+            return origSetAppMenu.call(this, menu);
+        };
+    });
+    safePatch(electron.Menu, 'buildFromTemplate', function(origBuildFromTemplate) {
+        return function(template) {
+            if (Array.isArray(template)) { try { translateMenuItems(template); } catch(e) {} }
+            const menu = origBuildFromTemplate.call(this, template);
+            if (menu && menu.items) { try { translateMenuItems(menu.items); } catch(e) {} }
+            return menu;
+        };
+    });
+}
 
 // -------------------------------------------------------------
 // 2. Hook System Tray APIs (safe)
 // -------------------------------------------------------------
-(function(){
-    function safeProtoPatch(proto, key, fn) {
-        try {
-            const orig = proto[key];
-            if (typeof orig !== 'function') return;
-            const wrapped = fn(orig);
-            try { proto[key] = wrapped; } catch(_) {
-                try { Object.defineProperty(proto, key, { value: wrapped, writable: true, configurable: true }); } catch(_2) {}
-            }
-        } catch(e) {}
-    }
-    if (electron.Tray && electron.Tray.prototype) {
-        safeProtoPatch(electron.Tray.prototype, 'setContextMenu', function(origSetContextMenu) {
-            return function(menu) {
-                if (menu && menu.items) { try { translateMenu(menu.items); } catch(e) {} }
-                return origSetContextMenu.call(this, menu);
-            };
-        });
-        safeProtoPatch(electron.Tray.prototype, 'setToolTip', function(origSetToolTip) {
-            return function(toolTip) {
-                const translated = typeof toolTip === 'string' ? translateText(toolTip) : toolTip;
-                return origSetToolTip.call(this, translated);
-            };
-        });
-    }
-})();
+if (electron.Tray && electron.Tray.prototype) {
+    safePatch(electron.Tray.prototype, 'setContextMenu', function(origSetContextMenu) {
+        return function(menu) {
+            if (menu && menu.items) { try { translateMenuItems(menu.items); } catch(e) {} }
+            return origSetContextMenu.call(this, menu);
+        };
+    });
+    safePatch(electron.Tray.prototype, 'setToolTip', function(origSetToolTip) {
+        return function(toolTip) {
+            const translated = typeof toolTip === 'string' ? translateText(toolTip) : toolTip;
+            return origSetToolTip.call(this, translated);
+        };
+    });
+}
 
 // -------------------------------------------------------------
 // 3. Hook System Dialog APIs (safe)
@@ -1380,28 +1238,30 @@ function translateDialogOptions(opts) {
         translateDialogOptions(opts);
         args[idx] = opts;
     }
-    function safeDialogPatch(key, wrapper) {
-        try {
-            const orig = electron.dialog[key];
-            if (typeof orig !== 'function') return;
-            const wrapped = wrapper(orig);
-            try { electron.dialog[key] = wrapped; } catch(_) {
-                try { Object.defineProperty(electron.dialog, key, { value: wrapped, writable: true, configurable: true }); } catch(_2) {}
-            }
-        } catch(e) {}
+
+    const dialogMethods = ['showMessageBox', 'showMessageBoxSync', 'showOpenDialog', 'showOpenDialogSync', 'showSaveDialog', 'showSaveDialogSync'];
+    for (const method of dialogMethods) {
+        safePatch(electron.dialog, method, function(orig) {
+            return function(...args) {
+                try { translateDialogArgs(args); } catch(e) {}
+                return orig.apply(this, args);
+            };
+        });
     }
-    safeDialogPatch('showMessageBox', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
-    safeDialogPatch('showMessageBoxSync', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
-    safeDialogPatch('showOpenDialog', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
-    safeDialogPatch('showOpenDialogSync', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
-    safeDialogPatch('showErrorBox', function(orig){ return function(title, content){ try{ if(typeof title==='string') title=translateText(title); if(typeof content==='string') content=translateText(content);}catch(e){} return orig.call(this,title,content); }; });
-    safeDialogPatch('showSaveDialog', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
-    safeDialogPatch('showSaveDialogSync', function(orig){ return function(...args){ try{translateDialogArgs(args);}catch(e){} return orig.apply(this,args); }; });
+
+    safePatch(electron.dialog, 'showErrorBox', function(orig) {
+        return function(title, content) {
+            try {
+                if (typeof title === 'string') title = translateText(title);
+                if (typeof content === 'string') content = translateText(content);
+            } catch(e) {}
+            return orig.call(this, title, content);
+        };
+    });
 })();
 
 // -------------------------------------------------------------
 // 3.4 Hook System Notifications (使用 Proxy 代理，完整保留 C++ 原生类结构与 Internal Fields)
-// 渲染进程经 IPC 传入的 title/body 是 JS 字符串，DOM 翻译引擎无法覆盖，在这里统一翻译
 // -------------------------------------------------------------
 (function(){
     if (!electron.Notification) return;
@@ -1428,9 +1288,6 @@ function translateDialogOptions(opts) {
 
 // -------------------------------------------------------------
 // 3.5 同步 updater 菜单 action 查找表
-// 官方 updater.js 用 updateActions[menuItem.label] 查表执行动作（macOS 检查更新菜单）。
-// 菜单 label 被翻译成中文后查表会落空导致点击无反应，这里把中文键同步到查找表。
-// 原英文键保留，官方 enabled 判断（updateActions[step]）不受影响。
 // -------------------------------------------------------------
 (function syncUpdaterActions() {
     try {
@@ -1647,13 +1504,24 @@ function runCommandSync(cmd) {
     }
 }
 
-
+// asar 打包与解包执行器：优先调用本地 node_modules/.bin/asar，缺失时回退 npx @electron/asar
+function runAsar(action, src, dst) {
+    let res = null;
+    try {
+        const localAsar = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar');
+        if (fs.existsSync(localAsar)) {
+            res = runCommandSync(`"${localAsar}" ${action} "${src}" "${dst}"`);
+        }
+    } catch (_) {}
+    if (!res || !res.success) {
+        res = runCommandSync(`npx -y @electron/asar ${action} "${src}" "${dst}"`);
+    }
+    return res;
+}
 
 // ==========================================
 // Antigravity 2.0+ 汉化引擎 (单点全局拦截架构)
 // ==========================================
-// 解析主入口完整路径（自适应：优先读 asar 内 package.json 的 main 字段，官方升级若调整入口路径
-// （如 dist/main.js -> app/main.js）安装注入与汉化状态检测依然保持同源一致）
 function resolveMainEntry(tempDir) {
     let mainEntry = 'dist/main.js';
     try {
@@ -1668,14 +1536,8 @@ function resolveMainEntry(tempDir) {
     return path.join(tempDir, mainEntry);
 }
 
-// 内容级汉化状态检测：基于解包产物判断当前 app.asar 属于哪种状态。
-// asar header 只列文件名，旧版多点补丁（menu.js/tray.js/preload.js 内嵌代码）在 header 中不可见，
-// 必须读文件内容才能识别，否则升级路径上会把旧版汉化包误判为官方原版并污染官方备份。
 function detectHanhuaState(tempDir) {
     try {
-        // 单点核心模块写在主入口同目录，检测必须与 resolveMainEntry 同源：
-        // 若官方调整入口路径导致这里查不到已存在的 core，汉化包会被误判为 clean，
-        // 后续 hash 对比会用汉化包覆盖官方备份 app.asar.bak（最严重的污染场景）
         const corePath = path.join(path.dirname(resolveMainEntry(tempDir)), "antigravity_i18n_core.js");
         if (fs.existsSync(corePath)) return 'new';
         const distDir = path.join(tempDir, "dist");
@@ -1706,33 +1568,22 @@ function install20(resourcesDir) {
         return false;
     }
 
-    // 1. 临时提取目录（提前解包：备份决策需要基于解包后的内容级检测）
-    // 放在系统临时目录：解包产物数百 MB，避免落在工具目录（桌面）触发同步盘风暴或碎片残留
+    // 1. 临时提取目录
     const tempDir = path.join(os.tmpdir(), `antigravity_hanhua_asar_${process.pid}`);
     if (fs.existsSync(tempDir)) {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
-    console.log(`[解包] 正在使用 npx 提取 app.asar...`);
-    // 优先使用本地已安装的 asar（离线可用），缺失时回退 npx
-    let extractRes = null;
-    try {
-        const localAsar = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar');
-        if (fs.existsSync(localAsar)) {
-            extractRes = runCommandSync(`"${localAsar}" extract "${asarPath}" "${tempDir}"`);
-        }
-    } catch(_){}
-    if (!extractRes || !extractRes.success) {
-        extractRes = runCommandSync(`npx -y @electron/asar extract "${asarPath}" "${tempDir}"`);
-    }
-    if (!extractRes.success || !fs.existsSync(tempDir)) {
+    console.log(`[解包] 正在使用 asar 提取 app.asar...`);
+    const extractRes = runAsar('extract', asarPath, tempDir);
+    if (!extractRes || !extractRes.success || !fs.existsSync(tempDir)) {
         console.error(`[错误] 解包失败，可能是由于系统未安装 Node.js/npm 或者网络限制。`);
-        console.error(`详情: ${extractRes.stderr}\n${extractRes.stdout}`);
+        console.error(`详情: ${extractRes ? extractRes.stderr : ''}\n${extractRes ? extractRes.stdout : ''}`);
         try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
         return false;
     }
 
-    // 2. 内容级汉化状态检测（new=新版单点 / legacy=旧版多点补丁 / clean=官方原版）
+    // 2. 内容级汉化状态检测
     const hanhuaState = detectHanhuaState(tempDir);
     if (hanhuaState === 'new') {
         console.log(`[检测] 当前 app.asar 为汉化版（单点架构），将基于官方备份重新注入...`);
@@ -1742,7 +1593,7 @@ function install20(resourcesDir) {
         console.log(`[检测] 当前 app.asar 为官方原版。`);
     }
 
-    // 3. 备份（决策依据解包内容，杜绝用任何汉化包覆盖官方备份；所有 copy 加 EBUSY 容错）
+    // 3. 备份
     let _safeCopy = (src, dst, label) => {
         try { fs.copyFileSync(src, dst); return true; } catch (e) {
             console.warn(`[警告] ${label} 失败（${e.code||e.message}），将尝试增量路径: ${e.message}`);
@@ -1759,20 +1610,10 @@ function install20(resourcesDir) {
             else console.warn(`[警告] 备份创建失败，继续注入但卸载还原将不可用。`);
         }
     } else if (hanhuaState !== 'clean') {
-        // 当前 app.asar 是汉化版（新版或旧版），还原官方备份并重新提取纯净原版，实现无污染注入
         if (_safeCopy(bakPath, asarPath, '还原官方备份')) {
             console.log(`[还原] 已重置当前 app.asar 为官方原始备份包，正在重新提取官方原版...`);
             fs.rmSync(tempDir, { recursive: true, force: true });
-            let reExtract = null;
-            try {
-                const localAsar = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar');
-                if (fs.existsSync(localAsar)) {
-                    reExtract = runCommandSync(`"${localAsar}" extract "${asarPath}" "${tempDir}"`);
-                }
-            } catch(_){}
-            if (!reExtract || !reExtract.success) {
-                reExtract = runCommandSync(`npx -y @electron/asar extract "${asarPath}" "${tempDir}"`);
-            }
+            const reExtract = runAsar('extract', asarPath, tempDir);
             if (reExtract && reExtract.success && fs.existsSync(tempDir)) {
                 console.log(`[解包] 官方原版解包完成，已就绪纯净基座！`);
             } else {
@@ -1782,11 +1623,9 @@ function install20(resourcesDir) {
             console.log(`[提示] 当前 app.asar 被锁定（可能是客户端正在运行），将使用当前包进行增量注入。`);
         }
     } else {
-        // 当前是官方原版：对比 hash 判断是否升级过
         let currentHash, bakHash;
         try { currentHash = hashFile(asarPath); bakHash = hashFile(bakPath); } catch(e) { currentHash = ''; bakHash = 'x'; }
         if (currentHash !== bakHash) {
-            // 防呆：更新备份前再次确认当前包完好（hash 不同可能意味着上一轮打包失败留下了损坏的包）
             if (!isValidAsar(asarPath)) {
                 console.error(`[错误] 当前 app.asar 不是有效的 asar 包，已中止操作以保护官方备份 app.asar.bak。请重新安装官方客户端后重试。`);
                 try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
@@ -1800,16 +1639,14 @@ function install20(resourcesDir) {
         }
     }
 
-    // 3. 解析主入口（自适应：与 detectHanhuaState 共用同一解析，保证检测与注入位置永远一致）
+    // 4. 解析主入口与生成核心 core
     const mainJsPath = resolveMainEntry(tempDir);
-
-    // core 模块写到 main.js 同目录，保证 require('./antigravity_i18n_core.js') 始终相对正确
     const coreJsPath = path.join(path.dirname(mainJsPath), "antigravity_i18n_core.js");
     console.log(`[生成] 正在构建全局单点拦截核心模块 antigravity_i18n_core.js ...`);
     const coreJsContent = generateI18nCoreJs();
     fs.writeFileSync(coreJsPath, coreJsContent, 'utf-8');
 
-    // 4. 注入 main.js (单点全局切入)
+    // 5. 注入 main.js (单点全局切入)
     if (!fs.existsSync(mainJsPath)) {
         console.error(`[错误] 解包产物中未找到主入口 ${mainJsPath}，官方包结构可能已变化。已中止，避免生成无效的汉化包。`);
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1826,7 +1663,7 @@ function install20(resourcesDir) {
     fs.writeFileSync(mainJsPath, mainContent, 'utf-8');
     console.log(`[修改] main.js 挂钩注入成功！`);
 
-    // 5. 注入 preload.js (用于主窗口渲染前零闪烁即时汉化)
+    // 6. 注入 preload.js (用于主窗口渲染前零闪烁即时汉化)
     const preloadPath = path.join(tempDir, "dist", "preload.js");
     if (fs.existsSync(preloadPath)) {
         console.log(`[修改] 正在向 preload.js 注入渲染层即时汉化引擎...`);
@@ -1840,7 +1677,7 @@ function install20(resourcesDir) {
         console.warn(`[警告] 未找到 dist/preload.js，将仅依赖 executeJavaScript 注入（页面渲染初期可能出现英文闪烁）。`);
     }
 
-    // 6. 清理可能遗留的历史多点补丁（确保旧版本升级至单点架构时保持绝对干净）
+    // 7. 清理可能遗留的历史多点补丁
     const legacyFiles = [
         { path: path.join(tempDir, "dist", "menu.js"), cleaner: cleanMenuJsContent },
         { path: path.join(tempDir, "dist", "tray.js"), cleaner: cleanTrayJsContent }
@@ -1855,27 +1692,17 @@ function install20(resourcesDir) {
         }
     }
 
-    // 7. 重新打包（优先本地 asar）
+    // 8. 重新打包
     console.log(`[打包] 正在将修改后的内容打包回 app.asar...`);
-    let packRes = null;
-    try {
-        const localAsar = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar');
-        if (fs.existsSync(localAsar)) {
-            packRes = runCommandSync(`"${localAsar}" pack "${tempDir}" "${asarPath}"`);
-        }
-    } catch(_){}
+    const packRes = runAsar('pack', tempDir, asarPath);
     if (!packRes || !packRes.success) {
-        packRes = runCommandSync(`npx -y @electron/asar pack "${tempDir}" "${asarPath}"`);
-    }
-
-    if (!packRes.success) {
         console.error(`[错误] 打包失败。`);
-        console.error(`详情: ${packRes.stderr}\n${packRes.stdout}`);
+        console.error(`详情: ${packRes ? packRes.stderr : ''}\n${packRes ? packRes.stdout : ''}`);
         console.error(`[保留] 临时目录未清理（${tempDir}），可手动检查解包产物；app.asar 未变动，官方备份 app.asar.bak 完好。`);
         return false;
     }
 
-    // 打包成功后校验结果，防止写入了损坏的 asar
+    // 打包成功后校验结果
     if (!isValidAsar(asarPath)) {
         console.error(`[错误] 打包结果校验失败：生成的 app.asar 不是有效的 asar 包。`);
         console.error(`[恢复] 正在从官方备份 app.asar.bak 恢复...`);
@@ -1889,7 +1716,7 @@ function install20(resourcesDir) {
         return false;
     }
 
-    // 8. 清理临时文件夹
+    // 9. 清理临时文件夹
     fs.rmSync(tempDir, { recursive: true, force: true });
 
     console.log(`[√] Antigravity 2.0+ 单点全局拦截汉化部署完成！`);
