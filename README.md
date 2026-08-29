@@ -31,7 +31,7 @@
 | 检查主进程文案 | `mainproc_keys_check.js` | 菜单/托盘/对话框字典覆盖 |
 | 活体验证 | `verify_fix_live.js` | 不重装，把新引擎注入活页面验证 |
 | 同类翻译检查 | `enum_group_check.js` | 枚举组（低中高/状态等）半翻译检查 |
-| 回归测试 | `engine_fix_test.js` | 转义扫描 + jsdom 真实 DOM 行为 + core 行为 + asar/状态检测/品牌模式/升级清理（99 项） |
+| 回归测试 | `engine_fix_test.js` | 转义扫描 + jsdom 真实 DOM 行为 + core 行为 + asar/状态检测/品牌模式/升级清理（100 项） |
 
 ## 开发注意
 

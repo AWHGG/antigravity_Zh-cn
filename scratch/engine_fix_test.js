@@ -159,6 +159,7 @@ async function runEngine(html) {
     ['Include unstaged changes', '包含未暂存的更改'],
     ['Describe your changes, or leave empty to auto-generate', '描述您的更改，或留空以自动生成'],
     ['Commit 8 file changes to master', '提交 8 个文件更改至 master'],
+    ['1,000 files, 2 folders', '1,000 个文件、2 个文件夹'],
   ];
   const html = cases.map((c, i) => '<div id="dyn' + i + '">' + c[0].replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
   const dom = await runEngine(html);

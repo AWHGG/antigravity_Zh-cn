@@ -257,7 +257,8 @@ function generateJs(preloadedDict) {
 
     function translateCountList(listStr) {
         if (!listStr) return '';
-        return listStr.split(',').map(s => translateCountItem(s.trim())).join('、');
+        const items = listStr.split(/,\\s+(?=\\d)/);
+        return items.map(s => translateCountItem(s.trim())).join('、');
     }
 
     function translateTaskTarget(target) {
