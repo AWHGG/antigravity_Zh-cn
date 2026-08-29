@@ -10,7 +10,7 @@ const electron = require('electron');
 function translateText(text) {
     if (!text || typeof text !== 'string') return text;
     const kernelTrans = translateString(text, null);
-    if (kernelTrans) return kernelTrans;
+    if (kernelTrans !== null) return kernelTrans;
     const n = norm(text);
     if (!n) return text;
 
@@ -29,7 +29,7 @@ function translateText(text) {
     }
     // 复合窗口标题分段（如 "New chat — Antigravity" / "Settings - Antigravity"）
     const compound = translateCompoundTitle(text, part => translateText(part));
-    if (compound) return compound;
+    if (compound !== null) return compound;
     return text;
 }
 
@@ -48,11 +48,12 @@ function translateMenuItems(items) {
                 cleanLabel = label.replace('&', '');
             }
             const translated = translateText(cleanLabel);
-            if (translated && translated !== cleanLabel) {
-                item.label = translated + mnemonic;
+            if (translated !== null && translated !== cleanLabel) {
+                // 空译值（品牌隐藏）：置空标签且不追加助记键后缀，避免产生 "(&A)" 残留
+                item.label = translated === '' ? '' : (translated + mnemonic);
             } else {
                 const transRaw = translateText(label);
-                if (transRaw && transRaw !== label) {
+                if (transRaw !== null && transRaw !== label) {
                     item.label = transRaw;
                 }
             }

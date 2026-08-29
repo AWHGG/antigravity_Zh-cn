@@ -75,13 +75,13 @@ console.log('\n[2] 渲染层行为（jsdom）');
 const tick = (ms = 40) => new Promise(r => setTimeout(r, ms));
 // 必须等 DOMContentLoaded 之后再 eval：jsdom 构造完成时 readyState 仍是 'loading'，
 // 引擎在 loading 状态只注册监听不执行初始扫描，会导致同步断言全部落空
-async function runEngine(html) {
+async function runEngine(html, engineJs) {
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true });
   const doc = dom.window.document;
   if (doc.readyState === 'loading') {
     await new Promise(r => doc.addEventListener('DOMContentLoaded', () => setTimeout(r, 0), { once: true }));
   }
-  dom.window.eval(js);
+  dom.window.eval(engineJs || js);
   return dom;
 }
 
@@ -578,6 +578,65 @@ function loadDictForBrand(mode) {
 check('english 模式：Antigravity 保持英文原样（identity 键，不进漏译池）', loadDictForBrand('english')['Antigravity'] === 'Antigravity');
 check('hidden 模式：Antigravity → 空串', loadDictForBrand('hidden')['Antigravity'] === '');
 check('translated 模式：Antigravity → 反重力（选项 3 生效）', loadDictForBrand('translated')['Antigravity'] === '反重力');
+
+// ---------- 7.5 品牌模式运行期回归（hidden 空译值全链路不得被真值判断吞没） ----------
+// 历史缺陷：空串译值被 `||` 链与 `if (trans)` 真值判断当作"未命中"吞掉，hidden 模式整体失效
+console.log('\n[7.5] 品牌模式运行期（hidden 空译值全链路）');
+{
+  const hiddenDict = loadDictForBrand('hidden');
+  const jsHidden = eng.generateJs(hiddenDict);
+  const dom = await runEngine('<div id="hb1">Antigravity</div><div id="hb2">Save</div><input id="hb3" placeholder="Antigravity" title="Open">', jsHidden);
+  const d = dom.window.document;
+  check('hidden：品牌文本节点译为空串（隐藏生效）', d.getElementById('hb1').textContent === '', JSON.stringify(d.getElementById('hb1').textContent));
+  check('hidden：非品牌文本翻译不受影响', d.getElementById('hb2').textContent === '保存', JSON.stringify(d.getElementById('hb2').textContent));
+  check('hidden：品牌 placeholder 属性译为空串', d.getElementById('hb3').getAttribute('placeholder') === '', JSON.stringify(d.getElementById('hb3').getAttribute('placeholder')));
+  check('hidden：非品牌 title 属性正常翻译', d.getElementById('hb3').getAttribute('title') === '打开', JSON.stringify(d.getElementById('hb3').getAttribute('title')));
+  // setAttribute 拦截器路径
+  const dynBtn = d.createElement('button');
+  dynBtn.setAttribute('title', 'Antigravity');
+  check('hidden：setAttribute 拦截器路径品牌译为空串', dynBtn.getAttribute('title') === '', JSON.stringify(dynBtn.getAttribute('title')));
+  // 动态新增文本节点（observer 路径）
+  const late = d.createElement('div');
+  late.textContent = 'Antigravity';
+  d.body.appendChild(late);
+  await tick();
+  check('hidden：动态新增品牌文本节点译为空串', late.textContent === '', JSON.stringify(late.textContent));
+  // 漏译池不得被品牌词污染
+  const dump = typeof d.defaultView.__AG_DUMP_MISSING__ === 'function' ? d.defaultView.__AG_DUMP_MISSING__() : [];
+  check('hidden：品牌词不进漏译采集池', !dump.includes('Antigravity'), JSON.stringify(dump.slice(0, 5)));
+  // 复合标题：后段为空译值时不得残留悬挂分隔符
+  d.title = 'New chat — Antigravity';
+  check('hidden：复合标题空段退化为单段（无悬挂分隔符）', d.title === '新会话', JSON.stringify(d.title));
+  dom.window.close();
+
+  // 主进程路径：托盘 tooltip 与菜单标签的品牌隐藏
+  const coreHidden = eng.generateI18nCoreJs(hiddenDict);
+  const hook2 = { trayTip: null };
+  const fakeElectron2 = {
+    Menu: {
+      setApplicationMenu: function () {},
+      buildFromTemplate: function (t) { return { items: t }; }
+    },
+    Tray: function Tray() {},
+    dialog: { showMessageBox: function () {}, showErrorBox: function () {} },
+    Notification: null,
+    BrowserWindow: function () {},
+    app: { on: () => {} }
+  };
+  fakeElectron2.Tray.prototype.setToolTip = function (t) { hook2.trayTip = t; };
+  vm.runInNewContext(coreHidden, {
+    require: (m) => { if (m === 'electron') return fakeElectron2; throw new Error('module not found: ' + m); },
+    module: { exports: {} },
+    console: { log() {}, warn() {}, error() {} },
+    Promise, Map, Object, Array, JSON, String, Proxy, Reflect, Error, setTimeout
+  });
+  const tr2 = new fakeElectron2.Tray();
+  tr2.setToolTip('Antigravity');
+  check('hidden：主进程托盘 tooltip 品牌译为空串', hook2.trayTip === '', JSON.stringify(hook2.trayTip));
+  const tpl2 = fakeElectron2.Menu.buildFromTemplate([{ label: 'Antigravity' }, { label: 'Save' }]);
+  check('hidden：菜单品牌标签译为空串（无助记键残留）', tpl2.items[0].label === '', JSON.stringify(tpl2.items[0].label));
+  check('hidden：菜单常规标签翻译不受影响', tpl2.items[1].label === '保存', JSON.stringify(tpl2.items[1].label));
+}
 
 // ---------- 8. 清理函数 ----------
 console.log('\n[8] 清理函数');

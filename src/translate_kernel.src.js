@@ -18,7 +18,12 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         if (!s) return null;
         const n = norm(s);
         if (!n) return null;
-        return map.get(n) || lowerMap.get(n.toLowerCase()) || null;
+        // 用 has 显式区分"未命中"与"空串译值"：品牌隐藏（--brand-title hidden）模式注入空译值，
+        // 不能被真值判断吞掉，否则隐藏功能在运行期整体失效
+        if (map.has(n)) return map.get(n);
+        const lower = n.toLowerCase();
+        if (lowerMap.has(lower)) return lowerMap.get(lower);
+        return null;
     }
 
     function unitToCn(unit) {
@@ -544,7 +549,7 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         const shortcutTrans = translateWithShortcut(valNorm);
         if (shortcutTrans) return shortcutTrans;
         const exactTrans = lookup(valNorm);
-        if (exactTrans) return exactTrans;
+        if (exactTrans !== null) return exactTrans;
         const dynamicTrans = translateDynamicText(valNorm, text, node);
         if (dynamicTrans && dynamicTrans !== valNorm) return dynamicTrans;
         return null;
@@ -577,6 +582,10 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         const prefixCn = translatePart(prefix);
         const suffixCn = translatePart(suffix);
         if (prefixCn !== prefix || suffixCn !== suffix) {
+            // 任一段译值为空串（品牌隐藏模式）：直接退化为另一段，避免残留悬挂分隔符
+            if (prefixCn === '' || suffixCn === '') {
+                return prefixCn === '' ? suffixCn : prefixCn;
+            }
             return prefixCn + ' ' + sep + ' ' + suffixCn;
         }
         return null;

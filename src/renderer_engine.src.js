@@ -171,11 +171,18 @@
         const valNorm = norm(title);
         if (!valNorm) return title;
         const exact = lookup(valNorm);
-        if (exact) return exact;
+        if (exact !== null) return exact;
         // 复合标题分段匹配（例如 "New chat — Antigravity" / "Settings - Antigravity"）
-        const compound = translateCompoundTitle(title, part => lookup(part) || translateString(part, null) || part);
-        if (compound) return compound;
-        return translateString(valNorm, null) || title;
+        // 分段回调必须区分"命中空译值"（品牌隐藏）与"未命中"，避免空串被 || 链吞掉
+        const compound = translateCompoundTitle(title, part => {
+            const partExact = lookup(part);
+            if (partExact !== null) return partExact;
+            const partTrans = translateString(part, null);
+            return partTrans !== null ? partTrans : part;
+        });
+        if (compound !== null) return compound;
+        const fallback = translateString(valNorm, null);
+        return fallback !== null ? fallback : title;
     }
 
     function translateElementAttrs(node) {
@@ -184,8 +191,8 @@
             const v = node.getAttribute(attr);
             if (v) {
                 const trans = translateAttrValue(v);
-                if (trans && trans !== v) node.setAttribute(attr, trans);
-                else if (!trans) recordMissedText(norm(v));
+                if (trans !== null && trans !== v) node.setAttribute(attr, trans);
+                else if (trans === null) recordMissedText(norm(v));
             }
         }
     }
@@ -200,7 +207,7 @@
                     if (!isBlocked) {
                         if (!/[\u4e00-\u9fa5]/.test(value)) {
                             const trans = translateAttrValue(value);
-                            if (trans) value = trans;
+                            if (trans !== null) value = trans;
                         }
                     }
                 }
@@ -217,7 +224,7 @@
                             const isBlocked = typeof this.closest === 'function' && this.closest(ALL_BLOCKED_SELECTOR);
                             if (!isBlocked) {
                                 const trans = translateAttrValue(val);
-                                if (trans) val = trans;
+                                if (trans !== null) val = trans;
                             }
                         }
                         return origTitleDesc.set.call(this, val);
@@ -238,7 +245,7 @@
                     set: function(val) {
                         if (typeof val === 'string' && !/[\u4e00-\u9fa5]/.test(val)) {
                             const trans = translateDocumentTitle(val);
-                            if (trans) val = trans;
+                            if (trans !== null) val = trans;
                         }
                         return origDocTitleDesc.set.call(this, val);
                     },
@@ -270,7 +277,7 @@
             if (titleParent && titleParent.tagName === 'TITLE') {
                 if (!/[\u4e00-\u9fa5]/.test(originalVal)) {
                     const tTrans = translateDocumentTitle(originalVal);
-                    if (tTrans && tTrans !== originalVal) {
+                    if (tTrans !== null && tTrans !== originalVal) {
                         translatedValues.set(node, tTrans);
                         isMutating = true;
                         try {
@@ -290,7 +297,8 @@
             if (isCodeLikeText(valNorm)) return;
 
             const transRes = translateString(valNorm, node);
-            const newVal = transRes || originalVal;
+            // 区分"未命中"（null）与"命中空译值"（品牌隐藏）：未命中保留原文，命中空译值允许清空
+            const newVal = transRes === null ? originalVal : transRes;
 
             // 空格保真：保留完整首尾空白段（pre-line/pre-wrap 容器内的缩进与列对齐不塌缩）
             const wsLead = originalVal.match(/^\s+/);
@@ -306,7 +314,8 @@
                 } finally {
                     isMutating = false;
                 }
-            } else if (/[a-zA-Z]/.test(valNorm) && !/[一-龥]/.test(valNorm) && !(transRes && transRes === valNorm)) {
+            } else if (transRes === null && /[a-zA-Z]/.test(valNorm) && !/[一-龥]/.test(valNorm)) {
+                // 未命中且为英文（非 identity 命中）：进漏译采集池
                 if (!/^#L\d+(-\d+)?$/i.test(valNorm)) {
                     if (missedTexts.size < MISSED_TEXTS_MAX) missedTexts.add(valNorm);
                 }
@@ -504,7 +513,7 @@
         try {
             if (document.title) {
                 const transTitle = translateDocumentTitle(document.title);
-                if (transTitle && transTitle !== document.title) document.title = transTitle;
+                if (transTitle !== null && transTitle !== document.title) document.title = transTitle;
             }
         } catch (e) {}
     };
