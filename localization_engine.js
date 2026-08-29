@@ -79,8 +79,8 @@ function loadDictionary() {
     return totalMap;
 }
 
-function generateJs() {
-    const fullDict = loadDictionary();
+function generateJs(preloadedDict) {
+    const fullDict = preloadedDict || loadDictionary();
     
     const dictJson = JSON.stringify(fullDict);
 
@@ -266,13 +266,7 @@ function generateJs() {
         if (map.has(normT)) return map.get(normT);
         const lowerT = normT.toLowerCase();
         if (lowerMap.has(lowerT)) return lowerMap.get(lowerT);
-        if (/^Run command$/i.test(normT)) return '运行命令';
-        if (/^Running command$/i.test(normT)) return '正在运行命令';
-        if (/^Command execution$/i.test(normT)) return '执行命令';
-        if (/^Task log$/i.test(normT)) return '任务日志';
-        if (/^command finished$/i.test(normT)) return '命令完成';
-        if (/^task finished$/i.test(normT)) return '任务完成';
-        const taskMatch = normT.match(/^task-(\\d+|[a-zA-Z0-9_-]+)$/i);
+        const taskMatch = normT.match(/^task-([a-zA-Z0-9_-]+)$/i);
         if (taskMatch) return '任务 ' + taskMatch[1];
         return target;
     }
@@ -544,16 +538,6 @@ function generateJs() {
                         }
                         return prefix + "限制，将在 " + tTrans + "后完全刷新。";
                     });
-                } else if (/^您已使用了部分.+?(刷新|限制)/i.test(valNorm)) {
-                    let temp = valNorm;
-                    temp = temp.replace(/(\\d+)\\s*days?/gi, '$1 天');
-                    temp = temp.replace(/(\\d+)\\s*hours?/gi, '$1 小时');
-                    temp = temp.replace(/(\\d+)\\s*minutes?/gi, '$1 分钟');
-                    temp = temp.replace(/(\\d+)\\s*seconds?/gi, '$1 秒');
-                    temp = temp.replace(/部分\\s+每周/g, '部分每周');
-                    temp = temp.replace(/部分\\s+每日/g, '部分每日');
-                    temp = temp.replace(/部分\\s+每月/g, '部分每月');
-                    newVal = temp;
                 } else if (/^Learn more about (.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Learn more about (.+)$/i, (match, p) => {
                         // 优先查字典（单一数据源：preset 译文与字典保持一致）；
@@ -618,8 +602,6 @@ function generateJs() {
                     if (/master|main|branch|changes|commit|更改|提交/i.test(pText)) {
                         newVal = originalVal.replace(/\\bto\\b/i, '至');
                     }
-                } else if (valNorm.includes('了解更多关于') && /inherit\\s+general/i.test(valNorm)) {
-                    newVal = valNorm.replace(/inherit\\s+general/gi, '继承通用设置 (Inherit General)');
                 } else if (/^Inherits your (.+?) settings(.*)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Inherits your (.+?) settings(.*)$/i, (match, cat, rest) => {
                         let cLower = cat.toLowerCase().trim();
@@ -700,10 +682,6 @@ function generateJs() {
                         if (t.toLowerCase() === 'mcp servers') return '刷新 MCP 服务器';
                         return '刷新配额与额度数据';
                     });
-                } else if (/^Show Remote Control QR code$/i.test(valNorm)) {
-                    newVal = '显示远程控制二维码';
-                } else if (/^Remote Control link$/i.test(valNorm)) {
-                    newVal = '远程控制链接';
                 } else if (/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Skills providing tailored instructions for happy path (.+?) development workflows\\.?$/i, (match, lang) => {
                         let translatedLang = lang;
@@ -747,10 +725,6 @@ function generateJs() {
                 } else if (/^Thought for (\\d+)(s|m|h)?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Thought for (\\d+)(s|m|h)?$/i, (match, num, unit) => {
                         return "思考了 " + num + " " + unitToCn(unit);
-                    });
-                } else if (/^Timed (\\d+)\\s+seconds?$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Timed (\\d+)\\s+seconds?$/i, (match, num) => {
-                        return "计时 " + num + " 秒";
                     });
                 // 动词步骤摘要（Explored/Analyzed/Edited/Created/Deleted/Searching）不设引擎整句支路：
                 // 字典动作词精确匹配 + 分片计数（官方 UI 将动作词与计数拆成独立文本节点）是唯一机制，避免双重翻译
@@ -859,10 +833,6 @@ function generateJs() {
                         let target = translateTaskTarget(prefix);
                         return "运行 " + target;
                     });
-                } else if (/^command finished$/i.test(valNorm)) {
-                    newVal = "命令已完成";
-                } else if (/^task finished$/i.test(valNorm)) {
-                    newVal = "任务已完成";
                 } else if (/^Load older messages, showing (\\d+) of (\\d+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Load older messages, showing (\\d+) of (\\d+)$/i, '加载更早的消息，当前显示 $1 / $2');
                 } else if (/^(\\d+) files? changed(\\s*\\+\\d+\\s*-\\d+)?$/i.test(valNorm)) {
@@ -876,7 +846,7 @@ function generateJs() {
                     newVal = valNorm.replace(/^(\\d+)\\s+subagents?\\s+running$/i, '$1 个子智能体正在运行');
                 } else if (/^(\\d+)\\s+tasks?\\s+running$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^(\\d+)\\s+tasks?\\s+running$/i, '$1 个任务正在运行');
-                } else if (/^(\\d+\\s+[a-zA-Z\\s]+)(?:,\\s*\\d+\\s+[a-zA-Z\\s]+)*$/i.test(valNorm) && translateCountList(valNorm) !== valNorm) {
+                } else if (/^([\\d,.]+\\s+[a-zA-Z\\s]+)(?:,\\s*[\\d,.]+\\s+[a-zA-Z\\s]+)*$/i.test(valNorm) && translateCountList(valNorm) !== valNorm) {
                     newVal = translateCountList(valNorm);
                 } else if (/^\\+(\\d+)\\s+more\\s+lines?$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^\\+(\\d+)\\s+more\\s+lines?$/i, '+$1 行');
@@ -941,10 +911,6 @@ function generateJs() {
                 } else if (/^(.+?): i\\/o timeout$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^(.+?): i\\/o timeout$/i, (match, prefix) => {
                         return prefix + ": I\\/O 超时 (i\\/o timeout)";
-                    });
-                } else if (/^Are you sure you want to delete (the |this )?project (.+?)\\??$/i.test(valNorm)) {
-                    newVal = valNorm.replace(/^Are you sure you want to delete (the |this )?project (.+?)\\??$/i, (match, article, name) => {
-                        return "您确定要删除项目 " + name + " 吗？";
                     });
                 } else if (/^Updated (.+)$/i.test(valNorm)) {
                     newVal = valNorm.replace(/^Updated (.+)$/i, "更新于 $1");
@@ -1138,9 +1104,6 @@ function generateJs() {
     } else {
         startEngine();
     }
-
-    // 引擎全部初始化完成，写入跨 world 防重标志（供另一 world 的引擎检测后退出）
-    if (rootEl && rootEl.dataset) rootEl.dataset.agHanhua = '1';
 })();
 ${SIGNATURE_END}`;
 
@@ -1203,10 +1166,10 @@ function cleanTrayJsContent(content) {
     return content;
 }
 
-function generateI18nCoreJs() {
-    const fullDict = loadDictionary();
+function generateI18nCoreJs(preloadedDict) {
+    const fullDict = preloadedDict || loadDictionary();
     const dictJson = JSON.stringify(fullDict);
-    const rendererJs = generateJs();
+    const rendererJs = generateJs(fullDict);
     const rendererJsEscaped = JSON.stringify(rendererJs);
 
     return `/**
@@ -1268,8 +1231,11 @@ function translateMenu(items) {
             const translated = translateText(cleanLabel);
             if (translated && translated !== cleanLabel) {
                 item.label = translated + mnemonic;
-            } else if (translateText(label) && translateText(label) !== label) {
-                item.label = translateText(label);
+            } else {
+                const transRaw = translateText(label);
+                if (transRaw && transRaw !== label) {
+                    item.label = transRaw;
+                }
             }
         }
         if (item.submenu) {
@@ -1298,8 +1264,11 @@ function translateTemplate(template) {
             const translated = translateText(cleanLabel);
             if (translated && translated !== cleanLabel) {
                 item.label = translated + mnemonic;
-            } else if (translateText(label) && translateText(label) !== label) {
-                item.label = translateText(label);
+            } else {
+                const transRaw = translateText(label);
+                if (transRaw && transRaw !== label) {
+                    item.label = transRaw;
+                }
             }
         }
         if (item.submenu && Array.isArray(item.submenu)) {
@@ -1841,7 +1810,7 @@ function install20(resourcesDir) {
 
     // 4. 注入 main.js (单点全局切入)
     if (!fs.existsSync(mainJsPath)) {
-        console.error(`[错误] 解包产物中未找到主入口 ${mainEntry}，官方包结构可能已变化。已中止，避免生成无效的汉化包。`);
+        console.error(`[错误] 解包产物中未找到主入口 ${mainJsPath}，官方包结构可能已变化。已中止，避免生成无效的汉化包。`);
         fs.rmSync(tempDir, { recursive: true, force: true });
         return false;
     }
@@ -1994,6 +1963,8 @@ function main() {
         } else if (args[i] === '--install-dir') {
             manualDir = args[i + 1] || "";
             i++;
+        } else if (args[i].startsWith('--install-dir=')) {
+            manualDir = args[i].slice('--install-dir='.length);
         } else if (args[i] === '--no-kill') {
             noKill = true;
         } else if (args[i] === '--brand-title') {
@@ -2016,14 +1987,10 @@ function main() {
     let resourcesDir = "";
     if (fs.existsSync(path.join(installDir, "resources"))) {
         resourcesDir = path.join(installDir, "resources");
-    } else if (installDir.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase().endsWith("/resources")) {
+    } else if (fs.existsSync(path.join(installDir, "app.asar"))) {
         resourcesDir = installDir;
     } else {
-        if (fs.existsSync(path.join(installDir, "app.asar"))) {
-            resourcesDir = installDir;
-        } else {
-            resourcesDir = path.join(installDir, "resources");
-        }
+        resourcesDir = path.join(installDir, "resources");
     }
 
     if (!fs.existsSync(resourcesDir)) {

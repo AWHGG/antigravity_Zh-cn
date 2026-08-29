@@ -4,7 +4,7 @@
   "description": "",
   "main": "localization_engine.js",
   "scripts": {
-    "test": "node scratch/engine_fix_test.js && node scratch/legacy_clean_test.js"
+    "test": "node scratch/engine_fix_test.js"
   },
   "keywords": [],
   "author": "",

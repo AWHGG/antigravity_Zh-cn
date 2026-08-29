@@ -7,16 +7,7 @@ const http = require('http');
 
 // 生成新版引擎代码（复用引擎模块）
 const ROOT = path.join(__dirname, '..');
-const SRC = fs.readFileSync(path.join(ROOT, 'localization_engine.js'), 'utf8');
-const DICTS_ABS = path.join(ROOT, 'dicts').replace(/\\/g, '\\\\');
-const MOD_SRC = SRC
-  .replace("const DICTS_FOLDER = 'dicts';", "const DICTS_FOLDER = '" + DICTS_ABS + "';")
-  .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER")
-  // 追加式导出：不依赖 main() 的调用形态（正则重写在 main() 被 if(require.main) 包裹后曾整体失效）
-  + '\nmodule.exports = Object.assign(module.exports, { generateJs });\n';
-const MOD_PATH = path.join(__dirname, '_live_mod.js');
-fs.writeFileSync(MOD_PATH, MOD_SRC);
-const { generateJs } = require(MOD_PATH);
+const { generateJs } = require(path.join(ROOT, 'localization_engine.js'));
 const NEW_ENGINE_JS = generateJs();
 console.log('新引擎代码大小:', (NEW_ENGINE_JS.length / 1024).toFixed(1), 'KB');
 
@@ -120,6 +111,5 @@ function probe(port) {
   }
 
   ws.close();
-  fs.rmSync(MOD_PATH, { force: true });
   process.exit(0);
 })();

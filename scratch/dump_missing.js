@@ -5,25 +5,6 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// ---------- 1. 找 DevTools 端口 ----------
-function findDevToolsPort() {
-  const pids = execSync('tasklist /fi "imagename eq Antigravity.exe" /nh', { encoding: 'utf8' })
-    .split(/\r?\n/).map(l => (l.match(/\d+/) || [])[0]).filter(Boolean);
-  const netstat = execSync('netstat -ano', { encoding: 'utf8' });
-  const ports = new Set();
-  for (const line of netstat.split(/\r?\n/)) {
-    const m = line.match(/TCP\s+127\.0\.0\.1:(\d+)\s+.*?LISTENING\s+(\d+)/);
-    if (m && pids.includes(m[2])) ports.add(Number(m[1]));
-  }
-  for (const port of ports) {
-    try {
-      const res = fetch(`http://127.0.0.1:${port}/json/version`);
-      // sync 无法 await，改用 execSync curl? 直接用 http 模块
-    } catch (e) {}
-  }
-  return [...ports];
-}
-
 // 用同步 HTTP 探测
 const http = require('http');
 function probe(port, cb) {
