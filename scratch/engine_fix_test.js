@@ -8,13 +8,15 @@ const { JSDOM } = require('jsdom');
 const ROOT = path.join(__dirname, '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'localization_engine.js'), 'utf8');
 const DICTS_ABS = path.join(ROOT, 'dicts').replace(/\\/g, '\\\\');
+const SRCDIR_ABS = path.join(ROOT, 'src').replace(/\\/g, '\\\\');
 
 // 追加式导出：在源码尾部扩展 module.exports，不依赖 main() 的调用形态（正则重写曾因
 // main() 改为 if(require.main) 包裹而整体失效，教训：测试挂钩必须与源码形态解耦）
 function buildMod(extraExports, brandMode) {
   let mod = SRC
     .replace("const DICTS_FOLDER = 'dicts';", "const DICTS_FOLDER = '" + DICTS_ABS + "';")
-    .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER");
+    .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER")
+    .replace("path.join(__dirname, 'src')", "'" + SRCDIR_ABS + "'");
   if (brandMode) {
     mod = mod.replace(
       "const BRAND_TITLE_MODE = BRAND_TITLE_ALIASES[String(getOptionValue('--brand-title', 'english')).toLowerCase()] || 'english';",
@@ -38,38 +40,21 @@ const core = eng.generateI18nCoreJs();
 
 (async () => {
 
-// ---------- 0. 模板字符串正则转义扫描 ----------
-console.log('\n[0] 模板字符串正则转义扫描');
-// 模板字面量会把 \s 吃成 s、\b 吃成退格符，历史上 9 处动态支路因此整批失效。
-// 此处直接扫描两个模板区间，出现"单反斜杠 + 正则元字符"即回归。
-function extractTemplates(src) {
-  const regions = [];
-  let i = src.indexOf('const jsSource = `');
-  if (i !== -1) { const j = src.indexOf('${SIGNATURE_END}`;', i); if (j !== -1) regions.push(['generateJs', src.slice(i, j)]); }
-  i = src.indexOf('return `/**');
-  if (i !== -1) {
-    // 引擎文件可能是 CRLF 行尾，结束标记用正则容错匹配（\n`;\n}）
-    const endRe = /\r?\n`;\s*\r?\n\}/g;
-    endRe.lastIndex = i;
-    const m = endRe.exec(src);
-    if (m) regions.push(['generateI18nCoreJs', src.slice(i, m.index)]);
-  }
-  return regions;
-}
-const regions = extractTemplates(SRC);
-check('两个模板区间均可定位', regions.length === 2, '实际: ' + regions.map(r => r[0]).join(','));
-let escBad = 0;
-for (const [name, txt] of regions) {
-  const re = /(^|[^\\])\\([sdwbSDBW.])/g;
-  let m;
-  while ((m = re.exec(txt)) !== null) {
-    escBad++;
-    const line = txt.slice(0, m.index).split('\n').length;
-    console.log('    受损转义 @' + name + ' 区间内第 ' + line + ' 行: ' + JSON.stringify(txt.slice(Math.max(0, m.index - 30), m.index + 12)));
-  }
-}
-check('模板内不存在单反斜杠正则元字符（\\s \\d \\b \\w \\. 等）', escBad === 0, '残留 ' + escBad + ' 处');
+// ---------- 0. 独立源文件结构完整性 ----------
+console.log('\n[0] 独立源文件结构完整性');
+// 注入代码已从模板字面量迁移为独立源文件（正规 JS，天然无模板转义受损问题）。
+// 此处校验签名标记与占位符完整性，防止源文件被误改导致生成产物缺损。
+const SRC_DIR = path.join(ROOT, 'src');
+const rendererSrc = fs.readFileSync(path.join(SRC_DIR, 'renderer_engine.src.js'), 'utf8');
+const coreSrc = fs.readFileSync(path.join(SRC_DIR, 'main_core.src.js'), 'utf8');
+const kernelSrc = fs.readFileSync(path.join(SRC_DIR, 'translate_kernel.src.js'), 'utf8');
+check('渲染层源文件含起止签名标记', rendererSrc.includes('ANTIGRAVITY CHINESE LOCALIZATION START') && rendererSrc.includes('ANTIGRAVITY CHINESE LOCALIZATION END'));
+check('渲染层源文件恰含一个内核注入标记且无字典占位符', (rendererSrc.match(/\/\/ __AG_KERNEL__/g) || []).length === 1 && !rendererSrc.includes('DICT_PLACEHOLDER'));
+check('主进程源文件恰含一个内核注入标记与一个渲染层注入码占位符', (coreSrc.match(/\/\/ __AG_KERNEL__/g) || []).length === 1 && (coreSrc.match(/RENDERER_CODE_PLACEHOLDER/g) || []).length === 1 && !coreSrc.includes('DICT_PLACEHOLDER'));
+check('内核源文件恰含一个字典占位符与一个版本占位符', (kernelSrc.match(/DICT_PLACEHOLDER/g) || []).length === 1 && (kernelSrc.match(/__AG_I18N_VERSION__/g) || []).length === 1);
+check('源文件中不存在退格符（\\b 误写回归）', !rendererSrc.includes(String.fromCharCode(8)) && !coreSrc.includes(String.fromCharCode(8)) && !kernelSrc.includes(String.fromCharCode(8)));
 check('生成代码中 \b 不是退格符（动作白名单）', !js.includes(String.fromCharCode(8)));
+check('生成代码已注入引擎版本号', js.includes('window.__AG_I18N_VERSION__') && !js.includes('__AG_I18N_VERSION__\''));
 
 // ---------- 1. 生成代码语法 ----------
 console.log('\n[1] 生成代码语法检查');
@@ -160,6 +145,18 @@ async function runEngine(html) {
     ['Describe your changes, or leave empty to auto-generate', '描述您的更改，或留空以自动生成'],
     ['Commit 8 file changes to master', '提交 8 个文件更改至 master'],
     ['1,000 files, 2 folders', '1,000 个文件、2 个文件夹'],
+    // 共享助手回归：时间段换算（translateTimeSpan）
+    ['Refreshes in 2 hours 30 minutes', '2 小时 30 分钟后刷新'],
+    ['Refreshes in 1 day, 2 hours', '1 天 2 小时后刷新'],
+    ['You have used some of your weekly limit, it will fully refresh in 3 hours.', '您已使用了部分每周限制，将在 3 小时后完全刷新。'],
+    // 共享助手回归：动词 + 计数列表（verbCountPhrase，含 Working 运行态）
+    ['Ran 3 files Working...', '正在执行 3 个文件 正在处理...'],
+    ['Checked 2 tasks', '已检查 2 个任务'],
+    ['Killed 2 tasks Working...', '正在终止 2 个任务...'],
+    // 共享助手回归：相对时间单位（agoUnitCn，紧凑与完整两形态）
+    ['5mo', '5个月前'],
+    ['2 weeks ago', '2 周前'],
+    ['1 minute ago', '1 分钟前'],
   ];
   const html = cases.map((c, i) => '<div id="dyn' + i + '">' + c[0].replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
   const dom = await runEngine(html);
@@ -378,6 +375,52 @@ async function runEngine(html) {
   dom.window.close();
 }
 
+// 2.15 属性漏译采集：未命中的英文属性进入漏译池，可翻译属性不视为漏译
+{
+  const dom = await runEngine('<div id="am"><button id="b1" title="Translate Me Please">X</button><button id="b2" aria-label="Open">Y</button></div>');
+  const d = dom.window.document;
+  check('可翻译 aria-label 正常汉化', d.getElementById('b2').getAttribute('aria-label') === '打开', JSON.stringify(d.getElementById('b2').getAttribute('aria-label')));
+  await tick();
+  const dump = typeof d.defaultView.__AG_DUMP_MISSING__ === 'function' ? d.defaultView.__AG_DUMP_MISSING__() : [];
+  check('未命中英文 title 属性进漏译池', dump.includes('Translate Me Please'), JSON.stringify(dump.slice(0, 8)));
+  check('已命中字典的属性不进漏译池', !dump.includes('Open'), JSON.stringify(dump.slice(0, 8)));
+  dom.window.close();
+}
+
+// 2.16 禁区零开口：禁区容器内输入框的属性坚决不翻译（静态/动态/属性赋值/新增节点全路径），宿主 UI 输入框不受影响
+{
+  const html = '<div id="zr">'
+    + '<div class="prose"><input id="zin1" placeholder="Settings" title="Delete" aria-label="Add inline comment"></div>'
+    + '<div translate="no"><input id="zin2" placeholder="Open"></div>'
+    + '<input id="zok" placeholder="Settings">'
+    + '</div>';
+  const dom = await runEngine(html);
+  const d = dom.window.document;
+  // 静态扫描：禁区容器内的输入框属性保持英文
+  check('禁区(.prose)内输入框 placeholder 不翻译', d.getElementById('zin1').getAttribute('placeholder') === 'Settings', JSON.stringify(d.getElementById('zin1').getAttribute('placeholder')));
+  check('禁区(.prose)内输入框 title 不翻译', d.getElementById('zin1').getAttribute('title') === 'Delete', JSON.stringify(d.getElementById('zin1').getAttribute('title')));
+  check('禁区(.prose)内输入框 aria-label 不翻译', d.getElementById('zin1').getAttribute('aria-label') === 'Add inline comment', JSON.stringify(d.getElementById('zin1').getAttribute('aria-label')));
+  check('translate=no 内输入框 placeholder 不翻译', d.getElementById('zin2').getAttribute('placeholder') === 'Open', JSON.stringify(d.getElementById('zin2').getAttribute('placeholder')));
+  check('宿主 UI 输入框 placeholder 照常翻译', d.getElementById('zok').getAttribute('placeholder') === '设置', JSON.stringify(d.getElementById('zok').getAttribute('placeholder')));
+  // 动态 setAttribute：禁区内的开口必须封死
+  d.getElementById('zin1').setAttribute('placeholder', 'Delete');
+  d.getElementById('zin2').setAttribute('placeholder', 'Delete');
+  d.getElementById('zok').setAttribute('placeholder', 'Delete');
+  check('禁区内输入框动态 placeholder 坚决不翻译', d.getElementById('zin1').getAttribute('placeholder') === 'Delete', JSON.stringify(d.getElementById('zin1').getAttribute('placeholder')));
+  check('translate=no 内输入框动态 placeholder 坚决不翻译', d.getElementById('zin2').getAttribute('placeholder') === 'Delete', JSON.stringify(d.getElementById('zin2').getAttribute('placeholder')));
+  check('宿主输入框动态 placeholder 照常翻译', d.getElementById('zok').getAttribute('placeholder') === '删除', JSON.stringify(d.getElementById('zok').getAttribute('placeholder')));
+  // 属性赋值器（title）路径：禁区内同样不翻译
+  d.getElementById('zin1').title = 'Open';
+  check('禁区内输入框 title 属性赋值不翻译', d.getElementById('zin1').getAttribute('title') === 'Open', JSON.stringify(d.getElementById('zin1').getAttribute('title')));
+  // addedNodes 路径：禁区容器内新增输入框不翻译
+  const lateInput = d.createElement('input');
+  d.querySelector('.prose').appendChild(lateInput);
+  lateInput.setAttribute('placeholder', 'Open');
+  await tick();
+  check('禁区内新增输入框（addedNodes + setAttribute）不翻译', lateInput.getAttribute('placeholder') === 'Open', JSON.stringify(lateInput.getAttribute('placeholder')));
+  dom.window.close();
+}
+
 // ---------- 3. 主进程 core 行为（vm + electron 桩） ----------
 console.log('\n[3] 主进程 core 行为（electron 桩）');
 {
@@ -430,10 +473,15 @@ console.log('\n[3] 主进程 core 行为（electron 桩）');
   check('core 动态正则 Version', hook.errBox[0] === '版本 1.2.3', JSON.stringify(hook.errBox[0]));
   check('core 动态正则 N running', hook.errBox[1] === '3 个智能体运行中', JSON.stringify(hook.errBox[1]));
 
+  fakeElectron.dialog.showErrorBox('New chat — Antigravity', 'Settings - Antigravity');
+  check('core 复合标题分段（全角破折号，经共享内核）', hook.errBox[0] === '新会话 — Antigravity', JSON.stringify(hook.errBox[0]));
+  check('core 复合标题分段（半角连字符，经共享内核）', hook.errBox[1] === '设置 - Antigravity', JSON.stringify(hook.errBox[1]));
+  check('core 内核版本号已注入', core.includes('AG_I18N_VERSION') && !core.includes("'__AG_I18N_VERSION__'"));
+
   check('core 含 showErrorBox hook', core.includes('showErrorBox'));
   check('core 含 Menu.prototype.popup hook', core.includes('popup'));
   check('core 含 BrowserWindow.setTitle hook', core.includes("BrowserWindow.prototype, 'setTitle'"));
-  check('core 含窗口标题复合分段', core.includes('compoundMatch'));
+  check('core 含窗口标题复合分段', core.includes('translateCompoundTitle'));
   check('core 含 updateActions 同步', core.includes('syncUpdaterActions') && core.includes("require('./updater')"));
   check('core 含 Notification hook', core.includes('HanhuaNotification') && core.includes('electron.Notification'));
   check('渲染引擎 nowrap 注入仅限控件（不再强制 width）', !js.includes("min-width', 'fit-content"));

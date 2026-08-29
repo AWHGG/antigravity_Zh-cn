@@ -224,19 +224,34 @@ Node.js 主进程中运行的原生界面与桌面集成由 `antigravity_i18n_co
 
 ---
 
+## 源码架构
+
+注入的引擎代码不再以模板字符串内嵌于 `localization_engine.js`，而是拆分为 `src/` 下的独立 JS 源文件（正规源码，可 lint、可测试、可调试），由宿主在构建期完成占位符替换后拼装：
+
+| 源文件 | 职责 |
+| --- | --- |
+| `src/translate_kernel.src.js` | 共享翻译内核：字典查表、快捷键/计数/任务目标解析、动态句式、代码特征防御、复合标题分段。渲染层与主进程同源注入。 |
+| `src/renderer_engine.src.js` | 渲染层引擎：单实例锁、排版护盾、属性/标题拦截器、TreeWalker 扫描、MutationObserver 调度、漏译采集。 |
+| `src/main_core.src.js` | 主进程拦截核心：菜单、托盘、对话框、通知、窗口标题与多窗口注入。 |
+
+宿主 `localization_engine.js` 负责：读取字典、把字典 JSON 与引擎版本号（取自 `package.json`）注入内核（`DICT_PLACEHOLDER` / `__AG_I18N_VERSION__`），再把内核拼装进渲染层与主进程源文件的 `__AG_KERNEL__` 标记处。生成产物在运行时暴露 `window.__AG_I18N_VERSION__` 供诊断与版本比对。
+
+---
+
 ## 维护与质量保证工具
 
-`scratch/` 目录下提供了 6 组维护与质量诊断工具，可通过 `维护工具.bat` 运行：
+`scratch/` 目录下提供了多组维护与质量诊断工具，可通过 `维护工具.bat` 运行：
 
 | 工具脚本 | 功能说明 |
 | --- | --- |
 | `dump_missing.js` | 通过 WebSocket 连接运行中客户端的 DevTools/CDP 端口，注入扫描探针，导出当前页面未翻译的文本清单。 |
+| `apply_missing.js` | 读取漏译清单，自动过滤已被字典覆盖与代码/路径样条目，生成待填字典骨架并可合并写入 `dicts/page_missing_pending.json`。 |
 | `verify_fix_live.js` | 不重新打包安装客户端，直接通过 CDP 将最新引擎代码注入运行中的页面，即时验证漏译修复效果。 |
 | `dict_check.js` | 扫描所有字典文件，检查跨文件同键冲突、空值翻译及重复键。 |
 | `dict_quality_check.js` | 检查同文件内大小写变体不一致、换行符残留、超长译文及用于防误译的身份键。 |
 | `mainproc_keys_check.js` | 检查主进程菜单、托盘、对话框关键文案在字典中的覆盖情况。 |
 | `enum_group_check.js` | 内置 38 组系统枚举词（程度/频率/方向/状态等），检查是否存在“部分翻译、部分遗留英文”的半翻译现象。 |
-| `engine_fix_test.js` | 运行 100 项自动化回归测试，涵盖模板字符串反斜杠转义扫描、JS 语法、jsdom 真实 DOM 行为、主进程桩行为、asar 头解析与状态机判定。 |
+| `engine_fix_test.js` | 运行 168 项自动化回归测试，涵盖源文件结构完整性、JS 语法、jsdom 真实 DOM 行为、主进程桩行为、动态句式、属性漏译采集、禁区零开口（禁区内输入框属性全路径不翻译）、asar 头解析与状态机判定。 |
 
 运行自动化测试：
 ```bash
