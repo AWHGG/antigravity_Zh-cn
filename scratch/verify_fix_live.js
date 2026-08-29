@@ -12,7 +12,8 @@ const DICTS_ABS = path.join(ROOT, 'dicts').replace(/\\/g, '\\\\');
 const MOD_SRC = SRC
   .replace("const DICTS_FOLDER = 'dicts';", "const DICTS_FOLDER = '" + DICTS_ABS + "';")
   .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER")
-  .replace(/\nmain\(\);\s*$/, '\nmodule.exports = { generateJs };\n');
+  // 追加式导出：不依赖 main() 的调用形态（正则重写在 main() 被 if(require.main) 包裹后曾整体失效）
+  + '\nmodule.exports = Object.assign(module.exports, { generateJs });\n';
 const MOD_PATH = path.join(__dirname, '_live_mod.js');
 fs.writeFileSync(MOD_PATH, MOD_SRC);
 const { generateJs } = require(MOD_PATH);

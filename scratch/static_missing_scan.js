@@ -5,8 +5,11 @@ const {execSync}=require('child_process');
 
 const ROOT=path.join(__dirname,'..');
 const DICT_DIR=path.join(ROOT,'dicts');
-const ASAR_BAK='C:\\Users\\geniu\\AppData\\Local\\Programs\\antigravity\\resources\\app.asar.bak';
-const ASAR_CUR='C:\\Users\\geniu\\AppData\\Local\\Programs\\antigravity\\resources\\app.asar';
+// 资源目录可传参指定（目录或 app.asar 路径均可），缺省回退本机默认安装位置
+const RES_ARG=process.argv[2]||'C:\\Users\\geniu\\AppData\\Local\\Programs\\antigravity\\resources';
+const RES_DIR=(()=>{ let p=RES_ARG; if(fs.existsSync(p)&&fs.statSync(p).isFile()&&p.toLowerCase().endsWith('.asar')) p=path.dirname(p); return p; })();
+const ASAR_BAK=path.join(RES_DIR,'app.asar.bak');
+const ASAR_CUR=path.join(RES_DIR,'app.asar');
 
 function loadDict(){
   const map={};
@@ -24,8 +27,8 @@ console.log(`字典总数 ${Object.keys(dict).length}`);
 const tmp=path.join(os.tmpdir(), `ag_static_${process.pid}_${Date.now()}`);
 if(fs.existsSync(tmp)) fs.rmSync(tmp,{recursive:true,force:true});
 fs.mkdirSync(tmp,{recursive:true});
-console.log(`解包 ${ASAR_BAK} -> ${tmp}`);
-execSync(`npx --yes @electron/asar extract "${ASAR_BAK}" "${tmp}"`, {stdio:'pipe'});
+console.log(`解包 ${ASAR_CUR} -> ${tmp}`);
+execSync(`npx --yes @electron/asar extract "${ASAR_CUR}" "${tmp}"`, {stdio:'pipe'});
 
 function isProbablyUI(str){
   const s=norm(str);

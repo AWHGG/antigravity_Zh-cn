@@ -1,18 +1,30 @@
-// 引擎修复验证测试：语法 + 注入代码行为（含 Shadow DOM 翻译）+ asar 头解析 + 清理函数
+// 引擎回归测试：模板转义扫描 + 语法 + jsdom 真实 DOM 行为 + 主进程 core 行为 + asar/清理/状态检测/品牌模式
+// 运行：node scratch/engine_fix_test.js  （依赖 devDependencies: jsdom）
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'localization_engine.js'), 'utf8');
-// 把 DICTS_FOLDER 指向真实字典目录（模块在 scratch/ 下加载，__dirname 会错）
 const DICTS_ABS = path.join(ROOT, 'dicts').replace(/\\/g, '\\\\');
-const MOD_SRC = SRC
-  .replace("const DICTS_FOLDER = 'dicts';", "const DICTS_FOLDER = '" + DICTS_ABS + "';")
-  .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER")
-  .replace(/\nmain\(\);\s*$/, '\nmodule.exports = { generateJs, generateI18nCoreJs, loadDictionary, cleanJsContent, cleanMainJsContent, cleanMenuJsContent, cleanTrayJsContent, isHanhuaAsar, isValidAsar, normalizeText, detectHanhuaState, hashFile };\n');
+
+// 追加式导出：在源码尾部扩展 module.exports，不依赖 main() 的调用形态（正则重写曾因
+// main() 改为 if(require.main) 包裹而整体失效，教训：测试挂钩必须与源码形态解耦）
+function buildMod(extraExports, brandMode) {
+  let mod = SRC
+    .replace("const DICTS_FOLDER = 'dicts';", "const DICTS_FOLDER = '" + DICTS_ABS + "';")
+    .replace("path.join(__dirname, DICTS_FOLDER)", "DICTS_FOLDER");
+  if (brandMode) {
+    mod = mod.replace(
+      "const BRAND_TITLE_MODE = BRAND_TITLE_ALIASES[String(getOptionValue('--brand-title', 'english')).toLowerCase()] || 'english';",
+      "const BRAND_TITLE_MODE = '" + brandMode + "';"
+    );
+  }
+  return mod + '\nmodule.exports = Object.assign(module.exports, { ' + extraExports + ' });\n';
+}
 const MOD_PATH = path.join(__dirname, '_engine_mod.js');
-fs.writeFileSync(MOD_PATH, MOD_SRC);
+fs.writeFileSync(MOD_PATH, buildMod('generateJs, generateI18nCoreJs, loadDictionary, cleanJsContent, cleanMainJsContent, cleanMenuJsContent, cleanTrayJsContent, isHanhuaAsar, isValidAsar, normalizeText, detectHanhuaState, resolveMainEntry, hashFile'));
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -21,271 +33,263 @@ function check(name, cond, detail) {
 }
 
 const eng = require(MOD_PATH);
+const js = eng.generateJs();
+const core = eng.generateI18nCoreJs();
+
+(async () => {
+
+// ---------- 0. 模板字符串正则转义扫描 ----------
+console.log('\n[0] 模板字符串正则转义扫描');
+// 模板字面量会把 \s 吃成 s、\b 吃成退格符，历史上 9 处动态支路因此整批失效。
+// 此处直接扫描两个模板区间，出现"单反斜杠 + 正则元字符"即回归。
+function extractTemplates(src) {
+  const regions = [];
+  let i = src.indexOf('const jsSource = `');
+  if (i !== -1) { const j = src.indexOf('${SIGNATURE_END}`;', i); if (j !== -1) regions.push(['generateJs', src.slice(i, j)]); }
+  i = src.indexOf('return `/**');
+  if (i !== -1) {
+    // 引擎文件可能是 CRLF 行尾，结束标记用正则容错匹配（\n`;\n}）
+    const endRe = /\r?\n`;\s*\r?\n\}/g;
+    endRe.lastIndex = i;
+    const m = endRe.exec(src);
+    if (m) regions.push(['generateI18nCoreJs', src.slice(i, m.index)]);
+  }
+  return regions;
+}
+const regions = extractTemplates(SRC);
+check('两个模板区间均可定位', regions.length === 2, '实际: ' + regions.map(r => r[0]).join(','));
+let escBad = 0;
+for (const [name, txt] of regions) {
+  const re = /(^|[^\\])\\([sdwbSDBW.])/g;
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    escBad++;
+    const line = txt.slice(0, m.index).split('\n').length;
+    console.log('    受损转义 @' + name + ' 区间内第 ' + line + ' 行: ' + JSON.stringify(txt.slice(Math.max(0, m.index - 30), m.index + 12)));
+  }
+}
+check('模板内不存在单反斜杠正则元字符（\\s \\d \\b \\w \\. 等）', escBad === 0, '残留 ' + escBad + ' 处');
+check('生成代码中 \b 不是退格符（动作白名单）', !js.includes(String.fromCharCode(8)));
 
 // ---------- 1. 生成代码语法 ----------
 console.log('\n[1] 生成代码语法检查');
-let js = eng.generateJs();
 let jsOk = true;
 try { new Function(js); } catch (e) { jsOk = false; console.log('  JS 语法错误: ' + e.message); }
 check('generateJs 输出为合法 JS', jsOk);
 check('输出不再含 REPLACEMENT_ENTRIES_PLACEHOLDER 占位符', !js.includes('REPLACEMENT_ENTRIES_PLACEHOLDER'));
 check('输出含 DICT_PLACEHOLDER 已替换', js.includes('new Map(Object.entries('));
-
-let core = eng.generateI18nCoreJs();
 let coreOk = true;
 try { new Function(core); } catch (e) { coreOk = false; console.log('  core 语法错误: ' + e.message); }
 check('generateI18nCoreJs 输出为合法 JS', coreOk);
 check('core 含注入代码常量', core.includes('RENDERER_INJECTION_CODE'));
-check('core 不再含 REPLACEMENT_ENTRIES_PLACEHOLDER', !core.includes('REPLACEMENT_ENTRIES_PLACEHOLDER'));
-
-// 体积对比：确认死代码移除生效（entriesJson 约为字典体积的两倍）
 const dictJsonSize = JSON.stringify(eng.loadDictionary(), null, 4).length;
 console.log('  (字典 JSON 约 ' + (dictJsonSize / 1024).toFixed(1) + ' KB，注入 JS ' + (js.length / 1024).toFixed(1) + ' KB)');
 
-// ---------- 2. 注入代码在模拟浏览器环境中的行为 ----------
-console.log('\n[2] 注入代码行为（mock DOM）');
-class MockNode {
-  constructor(type) { this.nodeType = type; this.childNodes = []; this.parentNode = null; this.parentElement = null; }
-}
-class MockText extends MockNode {
-  constructor(v) { super(3); this.nodeValue = v; }
-}
-class MockElement extends MockNode {
-  constructor(tag) {
-    super(1);
-    this.tagName = tag.toUpperCase();
-    this.attributes = {};
-    this.classList = { contains: () => false, add: () => {} };
-    this.style = { setProperty: () => {} };
-    this.shadowRoot = null;
-    this.isContentEditable = false;
-    this.host = null;
-    this.dataset = {};
+// ---------- 2. 渲染层行为（jsdom 真实 DOM） ----------
+console.log('\n[2] 渲染层行为（jsdom）');
+const tick = (ms = 40) => new Promise(r => setTimeout(r, ms));
+// 必须等 DOMContentLoaded 之后再 eval：jsdom 构造完成时 readyState 仍是 'loading'，
+// 引擎在 loading 状态只注册监听不执行初始扫描，会导致同步断言全部落空
+async function runEngine(html) {
+  const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true });
+  const doc = dom.window.document;
+  if (doc.readyState === 'loading') {
+    await new Promise(r => doc.addEventListener('DOMContentLoaded', () => setTimeout(r, 0), { once: true }));
   }
-  getAttribute(n) { return (n in this.attributes) ? this.attributes[n] : null; }
-  setAttribute(n, v) { this.attributes[n] = v; }
-  hasAttribute(n) { return n in this.attributes; }
-  get textContent() {
-    let s = '';
-    for (const c of this.childNodes) {
-      s += c.nodeType === 3 ? (c.nodeValue || '') : (c.textContent || '');
-    }
-    return s;
+  dom.window.eval(js);
+  return dom;
+}
+
+// 2.1 基础翻译 + 三级边界（禁区/流式区/交互控件）
+{
+  const dom = await runEngine('<main><div id="plain">Open</div><button id="btn">Save</button><div class="monaco-editor"><span id="code">Open</span></div><div class="prose"><span id="prose">Settings</span></div><div translate="no"><span id="tno">Open</span></div><svg><text id="svgtext">Open</text></svg><style id="instyle">.active { color: red }</style><p id="longp">Analyzing the spatial relationships observed in the original label compared to the current output</p></main>');
+  // $ 接收 CSS 选择器（'#id'），用 querySelector；此前误用 getElementById(id) 却传 '#id'，导致所有元素查不到
+  const $ = sel => dom.window.document.querySelector(sel);
+  check('普通文本 Open → 打开', $('#plain').textContent === '打开', JSON.stringify($('#plain').textContent));
+  check('button 控件 Save → 保存', $('#btn').textContent === '保存', JSON.stringify($('#btn').textContent));
+  check('monaco 禁区不翻译', $('#code').textContent === 'Open', JSON.stringify($('#code').textContent));
+  check('AI prose 流式区不翻译', $('#prose').textContent === 'Settings', JSON.stringify($('#prose').textContent));
+  check('[translate=no] 容器不翻译', $('#tno').textContent === 'Open', JSON.stringify($('#tno').textContent));
+  check('SVG <text> 不翻译（标签口径对齐）', $('#svgtext').textContent === 'Open', JSON.stringify($('#svgtext').textContent));
+  check('body 内联 <style> 内容不被篡改', $('#instyle').textContent.includes('.active { color: red }'), JSON.stringify($('#instyle').textContent));
+  check('字典未命中的长句保持原样', $('#longp').textContent.includes('Analyzing the spatial'), JSON.stringify($('#longp').textContent));
+  dom.window.close();
+}
+
+// 2.2 动态句式回归（本次修复的失效正则分支，全部走初始全量扫描）
+{
+  const cases = [
+    ['Explored 2 files', '已探索 2 个文件'],
+    ['Analyzed 3 files', '已分析 3 个文件'],
+    ['Edited 1 file', '已编辑 1 个文件'],
+    ['Created 2 folders', '已创建 2 个文件夹'],
+    ['Deleted 1 file', '已删除 1 个文件'],
+    ['Searching knowledge', '正在搜索 knowledge'],
+    ['All scheduled tasks run as gemini-3-pro.', '所有计划任务均以 gemini-3-pro 模型运行。'],
+    ['A scheduled task with ID t1 already exists.', 'ID 为 t1 的任务已存在。'],
+    ['+ Skill', '+ 技能'],
+    ['Skill (S)', '技能 (S)'],
+  ];
+  const html = cases.map((c, i) => '<div id="dyn' + i + '">' + c[0].replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
+  const dom = await runEngine(html);
+  cases.forEach((c, i) => {
+    const got = dom.window.document.getElementById('dyn' + i).textContent;
+    check('动态句式 "' + c[0] + '" → "' + c[1] + '"', got === c[1], '实际: ' + JSON.stringify(got));
+  });
+  // 白名单 \b 修复：带函数调用特征的步骤摘要不再被"代码特征过滤"拦截
+  const dom2 = await runEngine('<div id="wl">Explored foo.bar()</div>');
+  const wl = dom2.window.document.getElementById('wl').textContent;
+  check('白名单 \\b 修复：Explored foo.bar() → 已探索 foo.bar()', wl === '已探索 foo.bar()', '实际: ' + JSON.stringify(wl));
+  dom.window.close(); dom2.window.close();
+}
+
+// 2.3 属性翻译边界（原作者设计：仅插入子树根的 placeholder/title/aria-label 参与翻译，
+// 深层元素属性不展开——title/aria-label 常携带数据（路径/名称），不得纳入翻译面）
+{
+  const dom = await runEngine('<div id="attrroot"></div>');
+  const doc = dom.window.document;
+  const wrap = doc.createElement('div');
+  wrap.setAttribute('title', 'Open');
+  wrap.innerHTML = '<input id="ip" placeholder="Settings" title="Settings"><button id="bd" aria-label="Delete">X</button>';
+  doc.getElementById('attrroot').appendChild(wrap);
+  await tick();
+  check('子树根 title 翻译', wrap.getAttribute('title') === '打开', JSON.stringify(wrap.getAttribute('title')));
+  check('深层 placeholder 不翻译（属性翻译仅限根）', doc.getElementById('ip').getAttribute('placeholder') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('placeholder')));
+  check('深层 title 不翻译', doc.getElementById('ip').getAttribute('title') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('title')));
+  check('深层 aria-label 不翻译', doc.getElementById('bd').getAttribute('aria-label') === 'Delete', JSON.stringify(doc.getElementById('bd').getAttribute('aria-label')));
+  // input 直插：观察器按 BLOCKED 口径跳过（原作者设计）
+  const ip2 = doc.createElement('input');
+  ip2.id = 'ip2';
+  ip2.placeholder = 'Settings';
+  doc.getElementById('attrroot').appendChild(ip2);
+  await tick();
+  check('input 直插不入队（BLOCKED 口径）', ip2.getAttribute('placeholder') === 'Settings', JSON.stringify(ip2.getAttribute('placeholder')));
+  dom.window.close();
+}
+
+// 2.4 Shadow DOM：仅当宿主本身是插入子树的根时其 shadowRoot 被覆盖（原作者边界；
+// 深层宿主的 shadow 内容不展开，与属性同口径，不扩大翻译面）
+{
+  const dom = await runEngine('<div id="sh-root"></div>');
+  const doc = dom.window.document;
+  // 深层宿主：不在覆盖范围
+  const outer = doc.createElement('div');
+  const host = doc.createElement('ag-widget');
+  host.attachShadow({ mode: 'open' });
+  const s = doc.createElement('span');
+  s.textContent = 'Settings';
+  host.shadowRoot.appendChild(s);
+  outer.appendChild(host);
+  doc.getElementById('sh-root').appendChild(outer);
+  await tick();
+  check('深层宿主 shadow 内容不翻译（边界）', s.textContent === 'Settings', JSON.stringify(s.textContent));
+  // 宿主直插（本身是子树根）：覆盖
+  const host2 = doc.createElement('ag-widget2');
+  host2.attachShadow({ mode: 'open' });
+  const s2 = doc.createElement('span');
+  s2.textContent = 'Open';
+  host2.shadowRoot.appendChild(s2);
+  doc.getElementById('sh-root').appendChild(host2);
+  await tick();
+  check('宿主直插时 shadowRoot 被翻译', s2.textContent === '打开', JSON.stringify(s2.textContent));
+  dom.window.close();
+}
+
+// 2.5 批量插入走分片队列（150 节点 < 200 上限全部入队；200 上限为原作者性能护栏，溢出丢弃）
+{
+  const dom = await runEngine('<div id="sw"></div>');
+  const cont = dom.window.document.getElementById('sw');
+  for (let i = 0; i < 150; i++) {
+    const d = dom.window.document.createElement('div');
+    d.textContent = 'Open';
+    cont.appendChild(d);
   }
-  appendChild(c) { c.parentNode = this; c.parentElement = this; this.childNodes.push(c); return c; }
+  await tick(80);
+  const texts = Array.from(cont.children).map(c => c.textContent);
+  check('批量插入 150 节点全部分片翻译', texts.every(t => t === '打开'), '未翻译 ' + texts.filter(t => t !== '打开').length + ' 个');
+  dom.window.close();
 }
-class MockShadowRoot extends MockNode {
-  constructor(host) { super(11); this.host = host; }
-  appendChild(c) { c.parentNode = this; this.childNodes.push(c); return c; }
+
+// 2.6 跨 world 互斥：二次求值直接退出，不产生第二套 observer（由存活的第一个引擎继续翻译）
+{
+  const dom = await runEngine('<div id="m1">Open</div>');
+  dom.window.eval(js);
+  check('二次求值后防重标志仍为 1', dom.window.document.documentElement.dataset.agHanhua === '1');
+  const n = dom.window.document.createElement('div');
+  n.textContent = 'Save';
+  dom.window.document.body.appendChild(n);
+  await tick();
+  check('二次求值不产生双引擎，首个引擎继续翻译新节点', n.textContent === '保存', JSON.stringify(n.textContent));
+  dom.window.close();
 }
-MockElement.prototype.attachShadow = function () { const sr = new MockShadowRoot(this); this.shadowRoot = sr; return sr; };
 
-const body = new MockElement('body');
-const docEl = new MockElement('html');
-const document = { body, documentElement: docEl, readyState: 'complete', addEventListener: () => {} };
-const window = { addEventListener: () => {}, setTimeout: () => {} };
-const Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, DOCUMENT_FRAGMENT_NODE: 11 };
-const Element = MockElement;
-class MutationObserver { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} }
-const sandbox = { window, document, Node, Element, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-sandbox.window.window = sandbox.window;
+// 2.7 深层嵌套禁区：40 层普通 div 回溯到 monaco 容器仍熔断
+{
+  let html = '<div class="monaco-editor">';
+  for (let i = 0; i < 40; i++) html += '<div>';
+  html += '<span id="deep">Save</span>';
+  for (let i = 0; i < 40; i++) html += '</div>';
+  html += '</div>';
+  const dom = await runEngine(html);
+  check('40 层深嵌套禁区不误译', dom.window.document.getElementById('deep').textContent === 'Save', JSON.stringify(dom.window.document.getElementById('deep').textContent));
+  dom.window.close();
+}
 
-// 普通文本 + shadow DOM 静态文本
-const plainText = new MockText('Open');
-body.appendChild(plainText);
-const host = new MockElement('my-widget');
-body.appendChild(host);
-host.attachShadow();
-const shadowText = new MockText('Settings');
-host.shadowRoot.appendChild(shadowText);
-// 禁区内的英文不应翻译
-const codeZone = new MockElement('div');
-codeZone.setAttribute('class', 'monaco-editor');
-const codeText = new MockText('Open');
-codeZone.appendChild(codeText);
-body.appendChild(codeZone);
+// ---------- 3. 主进程 core 行为（vm + electron 桩） ----------
+console.log('\n[3] 主进程 core 行为（electron 桩）');
+{
+  const hook = { trayTip: null, dialogOpts: null, errBox: null, appMenu: null };
+  const fakeElectron = {
+    Menu: {
+      setApplicationMenu: function (menu) { hook.appMenu = menu; },
+      buildFromTemplate: function (template) { return { items: template.map(t => Object.assign({}, t)) }; }
+    },
+    Tray: function Tray() {},
+    dialog: {
+      showMessageBox: function (opts) { hook.dialogOpts = opts; },
+      showErrorBox: function (title, content) { hook.errBox = [title, content]; }
+    },
+    Notification: null,
+    BrowserWindow: function () {},
+    app: { on: () => {} }
+  };
+  fakeElectron.Tray.prototype.setToolTip = function (t) { hook.trayTip = t; };
+  const sandbox = {
+    require: (m) => { if (m === 'electron') return fakeElectron; throw new Error('module not found: ' + m); },
+    module: { exports: {} },
+    console: { log() {}, warn() {}, error() {} },
+    Promise, Map, Object, Array, JSON, String, Proxy, Reflect, Error, setTimeout
+  };
+  vm.runInNewContext(core, sandbox);
 
-vm.runInNewContext(js, sandbox);
+  const tpl = fakeElectron.Menu.buildFromTemplate([
+    { label: '&Open', submenu: [{ label: 'Settings' }] },
+    { label: 'Quit' }
+  ]);
+  check('菜单助记键 &Open → 打开(&O)', tpl.items[0].label === '打开(&O)', JSON.stringify(tpl.items[0].label));
+  check('菜单子项 Settings → 设置', tpl.items[0].submenu[0].label === '设置', JSON.stringify(tpl.items[0].submenu[0].label));
+  check('菜单动态正则 Quit 无需字典也走通（identity 保持）', typeof tpl.items[1].label === 'string');
 
-check('普通文本 Open → 打开', plainText.nodeValue === '打开', '实际: ' + JSON.stringify(plainText.nodeValue));
-check('Shadow DOM 静态文本 Settings → 设置', shadowText.nodeValue === '设置', '实际: ' + JSON.stringify(shadowText.nodeValue));
-check('禁区(monaco-editor)内文本不翻译', codeText.nodeValue === 'Open', '实际: ' + JSON.stringify(codeText.nodeValue));
-check('引擎初始化后写入 DOM 防重标志', docEl.dataset.agHanhua === '1', '实际: ' + JSON.stringify(docEl.dataset.agHanhua));
+  const tr = new fakeElectron.Tray();
+  tr.setToolTip('Quit');
+  check('托盘 tooltip 翻译', hook.trayTip === '退出', JSON.stringify(hook.trayTip));
 
-// 跨 world 双引擎防重：模拟 preload world 已启动引擎（dataset 标志已写），主 world 引擎应直接退出
-const lateText = new MockText('Save');
-body.appendChild(lateText);
-const sandbox2 = { ...sandbox, window: { addEventListener: () => {}, setTimeout: () => {} } };
-vm.runInNewContext(js, sandbox2);
-check('第二引擎检测到 DOM 标志后退出（新增文本不翻译）', lateText.nodeValue === 'Save', '实际: ' + JSON.stringify(lateText.nodeValue));
+  fakeElectron.dialog.showMessageBox({ title: 'Confirm Quit', message: 'Are you sure you want to quit?' });
+  check('对话框 title 翻译', hook.dialogOpts.title === '确认退出', JSON.stringify(hook.dialogOpts.title));
+  check('对话框 message 翻译', hook.dialogOpts.message === '您确定要退出吗？', JSON.stringify(hook.dialogOpts.message));
 
-// 深层嵌套禁区（E3 修复验证）：文本与禁区容器之间隔 39 层普通 div，
-// 禁区容器在回溯第 40 层 —— 旧 35 层限制会漏判误译，新 128 层应正确熔断
-const docEl2 = new MockElement('html');
-const body2 = new MockElement('body');
-const document2 = { body: body2, documentElement: docEl2, readyState: 'complete', addEventListener: () => {} };
-const sandbox3 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document2, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const deepLeaf = new MockText('Save');
-const deepInner = new MockElement('div');
-deepInner.appendChild(deepLeaf);
-let chain = deepInner;
-for (let i = 0; i < 39; i++) { const d = new MockElement('div'); d.appendChild(chain); chain = d; }
-const blockedContainer = new MockElement('div');
-blockedContainer.setAttribute('class', 'monaco-editor');
-blockedContainer.appendChild(chain);
-body2.appendChild(blockedContainer);
-vm.runInNewContext(js, sandbox3);
-check('40 层深嵌套禁区不误译（回溯深度足够）', deepLeaf.nodeValue === 'Save', '实际: ' + JSON.stringify(deepLeaf.nodeValue));
+  fakeElectron.dialog.showErrorBox('Version 1.2.3', '3 running');
+  check('core 动态正则 Version', hook.errBox[0] === '版本 1.2.3', JSON.stringify(hook.errBox[0]));
+  check('core 动态正则 N running', hook.errBox[1] === '3 个智能体运行中', JSON.stringify(hook.errBox[1]));
 
-// Inherits 正则修复（E6 轮发现的中英粘连 bug）：验证 "when working in this project" 后缀正确翻译
-const docEl3 = new MockElement('html');
-const body3 = new MockElement('body');
-const document3 = { body: body3, documentElement: docEl3, readyState: 'complete', addEventListener: () => {} };
-const sandbox4 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document3, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const inheritsText = new MockText('Inherits your general settings when working in this project.');
-body3.appendChild(inheritsText);
-vm.runInNewContext(js, sandbox4);
-check('Inherits 后缀 when working in this project 翻译正确', inheritsText.nodeValue === '继承您的通用设置（在此项目中工作时）', '实际: ' + JSON.stringify(inheritsText.nodeValue));
+  check('core 含 showErrorBox hook', core.includes('showErrorBox'));
+  check('core 含 updateActions 同步', core.includes('syncUpdaterActions') && core.includes("require('./updater')"));
+  check('core 含 Notification hook', core.includes('HanhuaNotification') && core.includes('electron.Notification'));
+  check('渲染引擎 nowrap 注入仅限控件（不再强制 width）', !js.includes("min-width', 'fit-content"));
+}
 
-// 枚举带单字母后缀（Medium (M)）：枚举选项快捷键格式翻译
-const docEl4 = new MockElement('html');
-const body4 = new MockElement('body');
-const document4 = { body: body4, documentElement: docEl4, readyState: 'complete', addEventListener: () => {} };
-const sandbox5 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document4, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const letterText = new MockText('Medium (M)');
-body4.appendChild(letterText);
-const lowText = new MockText('Low (L)');
-body4.appendChild(lowText);
-vm.runInNewContext(js, sandbox5);
-check('枚举单字母后缀 Medium (M) → 中 (M)', letterText.nodeValue === '中 (M)', '实际: ' + JSON.stringify(letterText.nodeValue));
-check('枚举单字母后缀 Low (L) → 低 (L)', lowText.nodeValue === '低 (L)', '实际: ' + JSON.stringify(lowText.nodeValue));
-
-// 思考链误译防护（E8 修复验证）：
-// 1. role="article" + aria-label="Agent response" 容器（Antigravity 智能体输出特征）内的文本不翻译
-// 2. 无特征容器中的大段英文正文里的短单词（and/all/now）不翻译（流式输出阶段的防护）
-// 3. 短容器中的枚举短词（High/Now）仍正常翻译（设置面板不受影响）
-const docEl5 = new MockElement('html');
-const body5 = new MockElement('body');
-const document5 = { body: body5, documentElement: docEl5, readyState: 'complete', addEventListener: () => {} };
-const sandbox6 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document5, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const agentArticle = new MockElement('div');
-agentArticle.setAttribute('role', 'article');
-agentArticle.setAttribute('aria-label', 'Agent response');
-const agentText = new MockText('Analyzing Uneven Distribution in the image layout');
-agentArticle.appendChild(agentText);
-body5.appendChild(agentArticle);
-// 流式阶段：普通 P 容器（无任何禁区特征）内的大段英文 + 短词
-const streamPara = new MockElement('p');
-const streamText = new MockText('I am now focusing on the user observation about the uneven distribution of the label');
-streamPara.appendChild(streamText);
-const shortWordInPara = new MockText('Now');
-streamPara.appendChild(shortWordInPara);
-body5.appendChild(streamPara);
-// 短容器枚举：父容器文本很短（设置面板枚举项）
-const enumWrap = new MockElement('div');
-const enumText = new MockText('Now');
-enumWrap.appendChild(enumText);
-body5.appendChild(enumWrap);
-vm.runInNewContext(js, sandbox6);
-check('role=article+Agent response 容器内不翻译', agentText.nodeValue === 'Analyzing Uneven Distribution in the image layout', '实际: ' + JSON.stringify(agentText.nodeValue));
-check('大段英文正文中的短词 Now 不翻译', shortWordInPara.nodeValue === 'Now', '实际: ' + JSON.stringify(shortWordInPara.nodeValue));
-check('短容器中的枚举词 Now 正常翻译', enumText.nodeValue === '现在', '实际: ' + JSON.stringify(enumText.nodeValue));
-
-// 禁区状态词例外（E9 修复验证）：
-// article 容器内 BUTTON 控件中的状态词（Explored/Working for 5s）应翻译；P 中的长正文不翻译
-const docEl6b = new MockElement('html');
-const body6b = new MockElement('body');
-const document6b = { body: body6b, documentElement: docEl6b, readyState: 'complete', addEventListener: () => {} };
-const sandbox6b = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document6b, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const agentBox = new MockElement('div');
-agentBox.setAttribute('role', 'article');
-agentBox.setAttribute('aria-label', 'Agent response');
-const statusBtn = new MockElement('button');
-const statusSpan = new MockElement('span');
-const statusText = new MockText('Explored');
-statusSpan.appendChild(statusText);
-statusBtn.appendChild(statusSpan);
-agentBox.appendChild(statusBtn);
-const statusBtn2 = new MockElement('button');
-const statusText2 = new MockText('Working for 5s');
-statusBtn2.appendChild(statusText2);
-agentBox.appendChild(statusBtn2);
-const bodyPara = new MockElement('p');
-const bodyText = new MockText('Analyzing the spatial relationships observed in the original label compared to the current output of the image');
-bodyPara.appendChild(bodyText);
-agentBox.appendChild(bodyPara);
-body6b.appendChild(agentBox);
-vm.runInNewContext(js, sandbox6b);
-check('article 容器内 BUTTON 状态词 Explored → 已深度调研', statusText.nodeValue === '已深度调研', '实际: ' + JSON.stringify(statusText.nodeValue));
-check('article 容器内 BUTTON 状态词 Working for 5s → 已工作 5 秒', statusText2.nodeValue === '已工作 5 秒', '实际: ' + JSON.stringify(statusText2.nodeValue));
-check('article 容器内 P 长正文不翻译', bodyText.nodeValue === 'Analyzing the spatial relationships observed in the original label compared to the current output of the image', '实际: ' + JSON.stringify(bodyText.nodeValue));
-
-// 执行摘要词例外（E10 修复验证）：
-// article 容器被引擎标记 translate=no + notranslate 后，内部的动作摘要词（Ran/Analyzed/Edited）应仍翻译
-const docEl7 = new MockElement('html');
-const body7 = new MockElement('body');
-const document7 = { body: body7, documentElement: docEl7, readyState: 'complete', addEventListener: () => {} };
-const sandbox8 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document7, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const agentWrap = new MockElement('div');
-agentWrap.setAttribute('role', 'article');
-agentWrap.setAttribute('aria-label', 'Agent response');
-agentWrap.setAttribute('translate', 'no');
-const agentWrapClass = agentWrap; // notranslate class via classList stub（mock classList.add 是 no-op，直接 setAttribute class）
-agentWrapClass.setAttribute('class', 'notranslate');
-// 步骤摘要：DIV(role=button) > DIV > SPAN
-const stepBtn = new MockElement('div');
-stepBtn.setAttribute('role', 'button');
-const stepInner = new MockElement('div');
-const stepSpan = new MockElement('span');
-const stepText = new MockText('Ran');
-stepSpan.appendChild(stepText);
-stepInner.appendChild(stepSpan);
-stepBtn.appendChild(stepInner);
-agentWrap.appendChild(stepBtn);
-const analyzedSpan = new MockElement('span');
-const analyzedText = new MockText('Analyzed');
-analyzedSpan.appendChild(analyzedText);
-agentWrap.appendChild(analyzedSpan);
-const editedSpan = new MockElement('span');
-const editedText = new MockText('Edited');
-editedSpan.appendChild(editedText);
-agentWrap.appendChild(editedSpan);
-// 思考链长句仍不翻译
-const reasoningP = new MockElement('p');
-const reasoningText = new MockText('Now I need to analyze the spacing between the Chinese characters and the alphanumeric values in the label to determine the optimal distribution');
-reasoningP.appendChild(reasoningText);
-agentWrap.appendChild(reasoningP);
-// 带前缀的句子不受动作词例外影响（保留英文，不翻译）
-const sentenceP = new MockElement('p');
-const sentenceText = new MockText('Ran the analysis to verify the alignment consistency');
-sentenceP.appendChild(sentenceText);
-agentWrap.appendChild(sentenceP);
-body7.appendChild(agentWrap);
-vm.runInNewContext(js, sandbox8);
-check('article+translate=no 内 摘要词 Ran → 已执行命令', stepText.nodeValue === '已执行命令', '实际: ' + JSON.stringify(stepText.nodeValue));
-check('article+translate=no 内 摘要词 Analyzed → 已完成分析', analyzedText.nodeValue === '已完成分析', '实际: ' + JSON.stringify(analyzedText.nodeValue));
-check('article+translate=no 内 摘要词 Edited → 已修改文件', editedText.nodeValue === '已修改文件', '实际: ' + JSON.stringify(editedText.nodeValue));
-check('思考链长句(article 内)仍不翻译', reasoningText.nodeValue === 'Now I need to analyze the spacing between the Chinese characters and the alphanumeric values in the label to determine the optimal distribution', '实际: ' + JSON.stringify(reasoningText.nodeValue));
-check('带后缀的动作句子 Ran the analysis... 不翻译', sentenceText.nodeValue === 'Ran the analysis to verify the alignment consistency', '实际: ' + JSON.stringify(sentenceText.nodeValue));
-
-// 单一数据源验证：Learn more about 的 preset 译文来自字典（Turbo Mode → 极速模式 (Turbo Mode)）
-const docEl6 = new MockElement('html');
-const body6 = new MockElement('body');
-const document6 = { body: body6, documentElement: docEl6, readyState: 'complete', addEventListener: () => {} };
-const sandbox7 = { window: { addEventListener: () => {}, setTimeout: () => {} }, document: document6, Node, Element: MockElement, MutationObserver, console, setTimeout, WeakMap, Map, Set, Object, Array, String, RegExp, JSON, Math };
-const turboText = new MockText('Learn more about Turbo Mode');
-body6.appendChild(turboText);
-vm.runInNewContext(js, sandbox7);
-check('Learn more about Turbo Mode → 了解更多关于 极速模式 (Turbo Mode)（走字典）', turboText.nodeValue === '了解更多关于 极速模式 (Turbo Mode)', '实际: ' + JSON.stringify(turboText.nodeValue));
-
-// core 模板内容检查（冲突修复）
-check('core 含 showErrorBox hook', core.includes('showErrorBox'));
-check('core 含 updateActions 同步', core.includes('syncUpdaterActions') && core.includes("require('./updater')"));
-check('core 含 Notification hook', core.includes('HanhuaNotification') && core.includes('electron.Notification'));
-check('渲染引擎 nowrap 注入仅限控件（不再强制 width）', !js.includes("min-width', 'fit-content"));
-
-// ---------- 3. asar 头解析 ----------
-console.log('\n[3] asar 头解析');
+// ---------- 4. asar 头解析 ----------
+console.log('\n[4] asar 头解析');
 const ASAR_DIR = path.join(__dirname, '_asar_test');
 fs.mkdirSync(ASAR_DIR, { recursive: true });
 const header = JSON.stringify({ files: { dist: { files: { 'antigravity_i18n_core.js': { size: 10, offset: '0' } } } } });
@@ -304,7 +308,6 @@ check('isValidAsar(垃圾文件) = false', !eng.isValidAsar(junkFile));
 check('isHanhuaAsar(垃圾文件) = false', !eng.isHanhuaAsar(junkFile));
 check('isValidAsar(不存在) = false', !eng.isValidAsar(path.join(ASAR_DIR, 'nope.asar')));
 
-// 小 header + 超大 header 边界
 const bigHeader = JSON.stringify({ files: { a: { size: 1, offset: '0' } } });
 const badBuf = Buffer.alloc(12);
 badBuf.writeUInt32LE(4, 0);
@@ -314,29 +317,12 @@ const badFile = path.join(ASAR_DIR, 'bad.asar');
 fs.writeFileSync(badFile, badBuf);
 check('isValidAsar(header 超限) = false', !eng.isValidAsar(badFile));
 
-// hashFile 流式结果与一次性计算一致
 const crypto = require('crypto');
 const testHashPath = path.join(ROOT, 'dicts', 'common.json');
 const direct = crypto.createHash('sha256').update(fs.readFileSync(testHashPath)).digest('hex');
 check('hashFile 流式结果与全量一致', eng.hashFile(testHashPath) === direct);
 
-// ---------- 4. 清理函数 ----------
-console.log('\n[4] 清理函数');
-const sigBlock = '/* --- ANTIGRAVITY CHINESE LOCALIZATION START --- */\ncode();\n/* --- ANTIGRAVITY CHINESE LOCALIZATION END --- */';
-const cleaned = eng.cleanJsContent('a();\n' + sigBlock + '\nb();');
-check('cleanJsContent 移除签名块', !cleaned.includes('ANTIGRAVITY CHINESE LOCALIZATION') && cleaned.includes('a();') && cleaned.includes('b();'), JSON.stringify(cleaned));
-
-const menuInjected = 'const x = 1;\n// ==========================================\ntranslateMenu(menu.items);\n// ==========================================\nconst y = 2;\n';
-const menuCleaned = eng.cleanMenuJsContent(menuInjected);
-check('cleanMenuJsContent 移除补丁块', !menuCleaned.includes('translateMenu(menu.items);') && menuCleaned.includes('const x = 1;') && menuCleaned.includes('const y = 2;'), JSON.stringify(menuCleaned));
-// 陷阱：官方代码里 endMark 之前有两处同风格注释，应删离 endMark 最近的那对，保留官方代码
-const menuTrap = '// ==========================================\nconst a = 1;\n// ==========================================\nconst b = 2;\ntranslateMenu(menu.items);\nconst c = 3;\n';
-const menuTrapCleaned = eng.cleanMenuJsContent(menuTrap);
-check('cleanMenuJsContent 定位最近起始标记', !menuTrapCleaned.includes('translateMenu(menu.items);') && menuTrapCleaned.includes('const a = 1;') && !menuTrapCleaned.includes('const b = 2;') && menuTrapCleaned.includes('const c = 3;'), JSON.stringify(menuTrapCleaned));
-
-check('cleanMainJsContent 移除 require', eng.cleanMainJsContent("'use strict';\nrequire('./antigravity_i18n_core.js');\napp.run();") === "'use strict';\napp.run();");
-
-// ---------- 5. 字典替换完整性（B2 防护验证） ----------
+// ---------- 5. 字典替换完整性 ----------
 console.log('\n[5] 字典替换完整性');
 const injectedMapMatch = js.match(/new Map\(Object\.entries\((\{[\s\S]*?\})\)\);/);
 let mapOk = false;
@@ -345,38 +331,73 @@ if (injectedMapMatch) {
 }
 check('注入代码中字典 JSON 完整可解析', mapOk);
 
-// ---------- 6. 汉化状态检测（升级路径防备份污染） ----------
+// ---------- 6. 汉化状态检测（升级路径防备份污染 + 入口同源对齐） ----------
 console.log('\n[6] detectHanhuaState 内容级检测');
 const STATE_DIR = path.join(__dirname, '_state_test');
 const mk = (rel, content) => { const p = path.join(STATE_DIR, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, content); return p; };
-fs.mkdirSync(path.join(STATE_DIR, 'dist'), { recursive: true });
+const rmState = () => fs.rmSync(STATE_DIR, { recursive: true, force: true });
+rmState();
 
 // 官方原版
-fs.rmSync(STATE_DIR, { recursive: true, force: true });
-fs.mkdirSync(path.join(STATE_DIR, 'dist'), { recursive: true });
 mk('dist/menu.js', '"use strict";\nconst menu = Menu.getApplicationMenu();');
 mk('dist/tray.js', '"use strict";\ntray.setToolTip(app.getName());');
 mk('dist/main.js', '"use strict";\napp.whenReady();');
 check('官方原版 → clean', eng.detectHanhuaState(STATE_DIR) === 'clean');
+check('resolveMainEntry 默认 dist/main.js', eng.resolveMainEntry(STATE_DIR).replace(/\\/g, '/').endsWith('dist/main.js'));
 
 // 旧版多点补丁
 fs.rmSync(path.join(STATE_DIR, 'dist', 'menu.js'));
 mk('dist/menu.js', '// ==========================================\nAntigravity Native Menu Chinese Translation\nconst translations = {};\ntranslateMenu(menu.items);');
 check('旧版 menu 补丁 → legacy', eng.detectHanhuaState(STATE_DIR) === 'legacy');
-
-// 旧版 tray 补丁
 fs.rmSync(path.join(STATE_DIR, 'dist', 'menu.js'));
 mk('dist/tray.js', '/* --- TRAY TRANSLATION START --- */\nconst t = {};\n/* --- TRAY TRANSLATION END --- */');
 check('旧版 tray 补丁 → legacy', eng.detectHanhuaState(STATE_DIR) === 'legacy');
-
-// 新版单点
 fs.rmSync(path.join(STATE_DIR, 'dist', 'tray.js'));
 mk('dist/antigravity_i18n_core.js', '// core');
 check('新版单点 → new', eng.detectHanhuaState(STATE_DIR) === 'new');
 
-fs.rmSync(STATE_DIR, { recursive: true, force: true });
+// 关键回归：非默认入口（package.json.main 指向 app/main.js）时，core 必须仍被识别为 new，
+// 否则已汉化包被误判 clean → hash 对比会拿汉化包覆盖官方备份
+rmState();
+mk('package.json', JSON.stringify({ name: 'app', main: 'app/main.js' }));
+mk('app/main.js', '"use strict";');
+check('resolveMainEntry 读取 package.json.main', eng.resolveMainEntry(STATE_DIR).replace(/\\/g, '/').endsWith('app/main.js'));
+check('非 dist 入口 + 无 core → clean', eng.detectHanhuaState(STATE_DIR) === 'clean');
+mk('app/antigravity_i18n_core.js', '// core');
+check('非 dist 入口 + core 在入口同目录 → new（防备份污染）', eng.detectHanhuaState(STATE_DIR) === 'new');
+rmState();
+
+// ---------- 7. 品牌模式字典 ----------
+console.log('\n[7] 品牌模式（--brand-title）');
+function loadDictForBrand(mode) {
+  const p = path.join(__dirname, '_brand_' + mode + '.js');
+  fs.writeFileSync(p, buildMod('loadDictionary', mode));
+  const d = require(p).loadDictionary();
+  fs.rmSync(p, { force: true });
+  return d;
+}
+check('english 模式：Antigravity 键删除（保持英文原样）', loadDictForBrand('english')['Antigravity'] === undefined);
+check('hidden 模式：Antigravity → 空串', loadDictForBrand('hidden')['Antigravity'] === '');
+check('translated 模式：Antigravity → 反重力（选项 3 生效）', loadDictForBrand('translated')['Antigravity'] === '反重力');
+
+// ---------- 8. 清理函数 ----------
+console.log('\n[8] 清理函数');
+const sigBlock = '/* --- ANTIGRAVITY CHINESE LOCALIZATION START --- */\ncode();\n/* --- ANTIGRAVITY CHINESE LOCALIZATION END --- */';
+const cleaned = eng.cleanJsContent('a();\n' + sigBlock + '\nb();');
+check('cleanJsContent 移除签名块', !cleaned.includes('ANTIGRAVITY CHINESE LOCALIZATION') && cleaned.includes('a();') && cleaned.includes('b();'), JSON.stringify(cleaned));
+
+const menuInjected = 'const x = 1;\n// ==========================================\ntranslateMenu(menu.items);\n// ==========================================\nconst y = 2;\n';
+const menuCleaned = eng.cleanMenuJsContent(menuInjected);
+check('cleanMenuJsContent 移除补丁块', !menuCleaned.includes('translateMenu(menu.items);') && menuCleaned.includes('const x = 1;') && menuCleaned.includes('const y = 2;'), JSON.stringify(menuCleaned));
+const menuTrap = '// ==========================================\nconst a = 1;\n// ==========================================\nconst b = 2;\ntranslateMenu(menu.items);\nconst c = 3;\n';
+const menuTrapCleaned = eng.cleanMenuJsContent(menuTrap);
+check('cleanMenuJsContent 定位最近起始标记', !menuTrapCleaned.includes('translateMenu(menu.items);') && menuTrapCleaned.includes('const a = 1;') && !menuTrapCleaned.includes('const b = 2;') && menuTrapCleaned.includes('const c = 3;'), JSON.stringify(menuTrapCleaned));
+check('cleanMainJsContent 移除 require', eng.cleanMainJsContent("'use strict';\nrequire('./antigravity_i18n_core.js');\napp.run();") === "'use strict';\napp.run();");
+
 fs.rmSync(ASAR_DIR, { recursive: true, force: true });
 fs.rmSync(MOD_PATH, { force: true });
 
 console.log('\n========== 结果: ' + pass + ' 通过, ' + fail + ' 失败 ==========');
 process.exit(fail ? 1 : 0);
+
+})().catch(e => { console.error('测试套件异常:', e); process.exit(1); });

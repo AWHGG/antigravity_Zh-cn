@@ -1,0 +1,12 @@
+# 依赖
+node_modules/
+
+# 运行时产物
+_install_log.txt
+
+# 测试/脚本生成的临时模块与夹具
+scratch/_*.js
+scratch/_*.log
+scratch/_*.txt
+scratch/_legacy_fixture/
+scratch/_*.json

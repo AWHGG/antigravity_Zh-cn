@@ -88,7 +88,6 @@
     "Pair Programming Mode": "结对编程模式",
     "Parent Agent": "父智能体",
     "Parent Agent ID": "父智能体 ID",
-    "Paused": "已暂停",
     "Plan & Execute Mode": "规划与执行模式",
     "Planning Mode": "规划模式",
     "Primary Agent": "主智能体",
@@ -121,7 +120,6 @@
     "Spawn Subagent": "生成子智能体",
     "Spawn Subagent Task": "生成子智能体任务",
     "Stop Agent": "停止智能体",
-    "Stopped": "已停止",
     "Subagent Capabilities": "子智能体能力",
     "Subagent Conversation ID": "子智能体会话 ID",
     "Subagent Description": "子智能体描述",
@@ -145,5 +143,9 @@
     "Waiting for input": "等待输入",
     "Waiting for message": "等待消息",
     "When enabled, agent is given awareness of lint errors created by its edits and may fix them without explicit user prompting.": "开启后，智能体将能实时感知其代码修改产生的 Lint 错误，并在无需用户明确要求的情况下自动完成修复。",
-    "Workspace Mode": "工作区模式"
+    "Workspace Mode": "工作区模式",
+    "Agent Edits": "智能体修改",
+    "Stop Subagent": "终止子智能体",
+    "Project Agent": "项目智能体",
+    "System Prompt": "系统提示词"
 }

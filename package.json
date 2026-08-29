@@ -1,0 +1,16 @@
+{
+  "name": "antigravity_cn_test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "localization_engine.js",
+  "scripts": {
+    "test": "node scratch/engine_fix_test.js && node scratch/legacy_clean_test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

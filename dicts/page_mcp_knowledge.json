@@ -163,5 +163,20 @@
     "Watching for file changes...": "正在监听文件变化...",
     "Working Directory": "工作目录",
     "Workspace Knowledge": "工作区知识库",
-    "Workspace Rules": "工作区规则"
+    "Workspace Rules": "工作区规则",
+    "Search MCP servers by name": "按名称搜索 MCP 服务器",
+    "Enable Antigravity to deploy apps to Google Cloud Run.": "允许 Antigravity 将应用直接部署至 Google Cloud Run。",
+    "Search and reference over 600,000 real-world app screens, user flows, and UI patterns from Mobbin directly within your AI tools.": "直接在 AI 工具中检索并引用来自 Mobbin 的 600,000+ 真实应用界面、用户流程与 UI 模式。",
+    "The GKE remote MCP server provides read write access to your GKE Kubernetes resources. It allows an AI agent to inspect and observe your environment.": "GKE 远程 MCP 服务器提供对 GKE Kubernetes 资源的读写访问，允许 AI 智能体检查与观测集群运行环境。",
+    "The Dart and Flutter MCP server exposes Dart (and Flutter) development tool actions to compatible AI-assistant clients.": "Dart 与 Flutter MCP 服务器向 AI 智能体暴露 Dart/Flutter 开发工具链动作能力。",
+    "The Genkit Model Context Protocol (MCP) Server gives AI-powered development tools the ability to build, debug and inspect your Genkit app.": "Genkit MCP 服务器赋予 AI 开发工具构建、调试与审查 Genkit 应用的能力。",
+    "The gopls Model Context Protocol (MCP) server provides tools for semantic code analysis, live diagnostics, and transformation of your Go codebase.": "gopls MCP 服务器为 Go 代码库提供语义代码分析、实时诊断与代码重构能力。",
+    "The Bigtable Admin remote MCP server lets you manage Bigtable resources.": "Bigtable Admin 远程 MCP 服务器允许管理 Bigtable 实例与资源。",
+    "Cloud CLI MCP Server provides tools to run gcloud and bq CLIcommands in a remote sandbox environment": "Cloud CLI MCP 服务器提供在远程沙箱环境中执行 gcloud 与 bq 命令的工具链。",
+    "The MCP Toolbox for Databases is an open-source MCP server designed to simplify and secure the development of tools for interacting with databases.": "数据库 MCP 工具箱是开源 MCP 服务，旨在简化并保护与数据库交互的工具开发。",
+    "The Google Home Developer MCP server allows you to search through Google Home documentation, OpenThread and Matter specifications documentation.": "Google Home 开发者 MCP 服务器支持检索 Google Home 文档、OpenThread 与 Matter 技术规范文档。",
+    "Neon MCP Server is an open-source tool that lets you interact with your Neon Postgres databases in natural language.": "Neon MCP 服务器支持通过自然语言与 Neon Serverless Postgres 数据库进行交互。",
+    "Interact with Redis key-value stores": "与 Redis 键值数据库进行交互",
+    "A Model Context Protocol server for interacting with MongoDB Atlas.": "用于与 MongoDB Atlas 云数据库进行交互的 MCP 服务器。",
+    "Official Notion MCP Server that allows interaction with Notion workspaces, pages, databases, and comments via the Notion API.": "Notion 官方 MCP 服务器，允许通过 Notion API 与工作区、页面、数据库和评论进行交互。"
 }

@@ -82,7 +82,6 @@
     "Move Line Down": "向下移动行",
     "Move Line Up": "向上移动行",
     "New Breakpoint": "新建断点",
-    "New Conversation": "新建会话",
     "New Editor Window": "新建编辑器窗口",
     "New File": "新建文件",
     "New File...": "新建文件...",
@@ -193,5 +192,9 @@
     "Workspace and Chat": "工作区与会话",
     "Workspaces": "工作区列表",
     "Zoom In": "放大",
-    "Zoom Out": "缩小"
+    "Zoom Out": "缩小",
+    "Paste and Match Style": "粘贴并匹配样式",
+    "Actual Size": "实际大小",
+    "Zoom": "缩放",
+    "Save Workspace As...": "另存工作区为..."
 }

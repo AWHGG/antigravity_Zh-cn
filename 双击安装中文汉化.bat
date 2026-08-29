@@ -1,18 +1,18 @@
 @echo off
+chcp 65001 >nul
 title Antigravity HanHua Tool
 
 echo.
-echo ÇëÑ¡Ôñ×óÉÏ½ÇÆ·ÅÆÏÔÊ¾·½Ê½£º
-echo [1] ÏÔÊ¾Ó¢ÎÄ Antigravity
-echo [2] ²»ÏÔÊ¾Æ·ÅÆÃû
-echo [3] ÏÔÊ¾ÖÐÎÄÆ·ÅÆÃû
+echo è¯·é€‰æ‹©å·¦ä¸Šè§’å“ç‰Œæ˜¾ç¤ºæ–¹å¼ï¼š
+echo [1] æ˜¾ç¤ºè‹±æ–‡ Antigravity
+echo [2] ä¸æ˜¾ç¤ºå“ç‰Œå
+echo [3] æ˜¾ç¤ºä¸­æ–‡å“ç‰Œå
 set "CHOICE_VAL=3"
-set /p "CHOICE_VAL=ÇëÊäÈëÑ¡Ïî [1/2/3] (Ö±½Ó°´ Enter Ä¬ÈÏÎª 3): "
+set /p "CHOICE_VAL=è¯·è¾“å…¥é€‰é¡¹ [1/2/3] (ç›´æŽ¥æŒ‰ Enter é»˜è®¤ä¸º 3): "
 set "BRAND_ARG=--brand-title translated"
 if "%CHOICE_VAL%"=="1" set "BRAND_ARG=--brand-title english"
 if "%CHOICE_VAL%"=="2" set "BRAND_ARG=--brand-title hidden"
 
-chcp 65001 >nul
 echo.
 echo [1/2] Injecting localization core...
 node "%~dp0localization_engine.js" %BRAND_ARG% %*

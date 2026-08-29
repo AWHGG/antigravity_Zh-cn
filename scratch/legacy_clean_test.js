@@ -5,7 +5,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'localization_engine.js'), 'utf8');
-const MOD_SRC = SRC.replace(/\nmain\(\);\s*$/, '\nmodule.exports = { cleanJsContent, cleanMainJsContent, cleanMenuJsContent, cleanTrayJsContent, detectHanhuaState };\n');
+const MOD_SRC = SRC + '\nmodule.exports = Object.assign(module.exports, { cleanJsContent, cleanMainJsContent, cleanMenuJsContent, cleanTrayJsContent, detectHanhuaState, resolveMainEntry });\n';
 const MOD_PATH = path.join(__dirname, '_legacy_mod.js');
 fs.writeFileSync(MOD_PATH, MOD_SRC);
 const eng = require(MOD_PATH);
