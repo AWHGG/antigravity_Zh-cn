@@ -94,8 +94,8 @@ function probe(port) {
   console.log('注入新引擎前：非禁区英文文本', before.length, '条，缺键', beforeMissing.length, '条');
   beforeMissing.slice(0, 30).forEach(t => console.log('  ', JSON.stringify(t)));
 
-  // 清掉旧引擎标志，注入新引擎
-  await evaluate('try { delete window.__AG_HANHUA_INSTALLED__; } catch(e) {}; try { delete document.documentElement.dataset.agHanhua; } catch(e) {}; true');
+  // 清掉旧引擎标志，注入新引擎（必须连同 DOM 互斥锁一起清理，否则新引擎在 data-ag-i18n-active 处直接早退，注入无效）
+  await evaluate('try { document.documentElement.removeAttribute(\'data-ag-i18n-active\'); } catch(e) {}; try { delete window.__AG_HANHUA_INSTALLED__; } catch(e) {}; try { delete document.documentElement.dataset.agHanhua; } catch(e) {}; true');
   await evaluate(NEW_ENGINE_JS);
   await new Promise(r => setTimeout(r, 1500));
 

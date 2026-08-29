@@ -69,7 +69,8 @@ function loadDictionary() {
         }
     }
     if (BRAND_TITLE_MODE === 'english') {
-        delete totalMap[normalizeText('Antigravity')];
+        // 保持英文原样，但保留为 identity 键（值=原文）：翻译结果不变，且不会因"未命中"污染漏译采集池
+        totalMap[normalizeText('Antigravity')] = 'Antigravity';
     } else if (BRAND_TITLE_MODE === 'hidden') {
         totalMap[normalizeText('Antigravity')] = '';
     } else if (BRAND_TITLE_MODE === 'translated') {
@@ -125,6 +126,10 @@ function generateJs(preloadedDict) {
     const translatedValues = new WeakMap();
     let isMutating = false;
 
+    // 可翻译的 DOM 元素属性集合（统一规范，保证扫描、增量与拦截三处完全对齐）
+    const TRANSLATABLE_ATTRS = ['placeholder', 'title', 'aria-label', 'data-tooltip', 'data-tip', 'data-title', 'data-balloon'];
+    const TRANSLATABLE_ATTRS_SET = new Set(TRANSLATABLE_ATTRS);
+
     // 标签级免翻白名单：包含脚本、样式、代码、多媒体、SVG 与表单输入标签，TreeWalker 遇到时整树跳过
     const BLOCKED_TAGS = new Set([
         'SCRIPT', 'STYLE', 'CODE', 'PRE', 'INPUT', 'TEXTAREA', 'SVG', 'CANVAS', 
@@ -138,6 +143,13 @@ function generateJs(preloadedDict) {
         '.md-divider-spacing',
         '.prose',
         '.markdown-body',
+        '[class*="markdown"]',
+        '[class*="rich-text"]',
+        '[class*="message-body"]',
+        '[class*="chat-message"] .prose',
+        '[data-role="assistant"] .prose',
+        '[data-message-author="assistant"] .prose',
+        '[data-message-author="assistant"] .whitespace-pre-wrap',
         '[data-thought]',
         '[data-thinking]',
         '[data-cot]',
@@ -149,9 +161,9 @@ function generateJs(preloadedDict) {
         '.stream-thought',
         '.cot-content',
         '.collapsible-thought-content',
-        '[data-is-streaming] .prose',
-        '[data-streaming] .prose',
-        '[data-is-generating] .prose'
+        '[data-is-streaming]',
+        '[data-streaming]',
+        '[data-is-generating]'
     ].join(', ');
 
     // 编辑器代码视口、终端字符屏与用户输入选择器：保护代码编辑区与命令行字符流不被篡改
@@ -189,7 +201,7 @@ function generateJs(preloadedDict) {
         '[data-turn-role="user"] .whitespace-pre-wrap',
         '[data-message-author="user"] .whitespace-pre-wrap',
         '[data-turn-role="user"] pre', '[data-turn-role="user"] code',
-        // 用户自定义历史会话标题
+        // 用户自定义历史会话标题（只保护标题文字，绝不封杀外层 UI）
         'a[href*="/c/"] [class*="truncate"]',
         '[data-testid*="conversation-item"] [class*="truncate"]',
         // 工具调用内部具体命令执行输出
@@ -316,6 +328,15 @@ function generateJs(preloadedDict) {
         'sending input to': '正在向任务发送输入 '
     };
 
+    // 安全门禁：判断是否属于 AI 长句正文或英文段落（防止宽泛动态正则暴力改写 AI 输出）
+    function isLongProse(s) {
+        if (!s || typeof s !== 'string') return false;
+        if (s.length > 70) return true;
+        const spaces = (s.match(/ /g) || []).length;
+        if (spaces > 6) return true;
+        return false;
+    }
+
     // 动态句式翻译器：通过正则与结构提取，匹配带变量、计数、时长或动态状态的 UI 文本
     function translateDynamicText(valNorm, originalVal, node) {
         if (/^Refreshes in (.+?)$/i.test(valNorm)) {
@@ -354,7 +375,7 @@ function generateJs(preloadedDict) {
                 return prefix + "限制，将在 " + tTrans + "后完全刷新。";
             });
         }
-        if (/^Learn more about (.+)$/i.test(valNorm)) {
+        if (/^Learn more about (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Learn more about (.+)$/i, (match, p) => {
                 const trans = lookup(p);
                 if (trans) return "了解更多关于 " + trans;
@@ -376,7 +397,7 @@ function generateJs(preloadedDict) {
                 return '计时 ' + num + ' ' + uCn;
             });
         }
-        if (/^Status:\\s*(.+)$/i.test(valNorm)) {
+        if (/^Status:\\s*(.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Status:\\s*(.+)$/i, (m, st) => {
                 const stNorm = norm(st);
                 let stCn = lookup(stNorm) || st;
@@ -395,7 +416,7 @@ function generateJs(preloadedDict) {
                 return '命令已退出，退出码 ' + code;
             });
         }
-        if (/^(.+?)\\s+finished$/i.test(valNorm)) {
+        if (/^(.+?)\\s+finished$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^(.+?)\\s+finished$/i, (m, prefix) => {
                 const pCn = lookup(prefix) || prefix;
                 return pCn + ' 已完成';
@@ -539,7 +560,7 @@ function generateJs(preloadedDict) {
                 return (verb.toLowerCase() === 'running' ? "正在运行 " : "已运行 ") + num + " 条命令";
             });
         }
-        if (/^Ran\\s+(.+)$/i.test(valNorm)) {
+        if (/^Ran\\s+(.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Ran\\s+(.+)$/i, (match, prefix) => {
                 let isWorking = / Working\\.\\.\\.$/i.test(prefix);
                 let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
@@ -547,20 +568,21 @@ function generateJs(preloadedDict) {
                 return (isWorking ? "正在执行 " : "已执行 ") + trans + (isWorking ? " 正在处理..." : "");
             });
         }
-        if (/^Searched\\s+(.+)$/i.test(valNorm)) {
+        if (/^Searched\\s+(.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Searched\\s+(.+)$/i, (match, body) => {
-                let res = body.replace(/(\\d+)\\s+results?/i, '$1 个结果').replace(/(\\d+)\\s+result/i, '$1 个结果');
-                return "已搜索 " + res;
+                let res = body.replace(/(\\d+)\\s+results?/i, '$1 个结果');
+                const countList = translateCountList(res);
+                return "已搜索 " + (countList !== res ? countList : res);
             });
         }
         // 任务状态动词：14 个分支统一合并
         const taskVerbMatch = valNorm.match(/^(Checked|Checking|Killed|Killing|Started|Starting|Paused|Pausing|Resumed|Resuming|Created|Creating|Sent input to|Sending input to)\\s+task\\s+(.+)$/i);
-        if (taskVerbMatch) {
+        if (taskVerbMatch && !isLongProse(valNorm)) {
             const actionKey = taskVerbMatch[1].toLowerCase();
             const prefix = TASK_VERB_ACTIONS[actionKey] || (taskVerbMatch[1] + ' task ');
             return prefix + translateTaskTarget(taskVerbMatch[2]);
         }
-        if (/^Checked (.+)$/i.test(valNorm)) {
+        if (/^Checked (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Checked (.+)$/i, (match, prefix) => {
                 let isWorking = / Working\\.\\.\\.$/i.test(prefix);
                 let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
@@ -568,12 +590,12 @@ function generateJs(preloadedDict) {
                 return (isWorking ? "正在检查 " : "已检查 ") + trans + (isWorking ? "..." : "");
             });
         }
-        if (/^Checking (.+)$/i.test(valNorm)) {
+        if (/^Checking (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Checking (.+)$/i, (match, prefix) => {
                 return "正在检查 " + translateCountList(prefix);
             });
         }
-        if (/^Killed (.+)$/i.test(valNorm)) {
+        if (/^Killed (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Killed (.+)$/i, (match, prefix) => {
                 let isWorking = / Working\\.\\.\\.$/i.test(prefix);
                 let cleanPrefix = prefix.replace(/ Working\\.\\.\\.$/i, '');
@@ -581,12 +603,12 @@ function generateJs(preloadedDict) {
                 return (isWorking ? "正在终止 " : "已终止 ") + trans + (isWorking ? "..." : "");
             });
         }
-        if (/^Killing (.+)$/i.test(valNorm)) {
+        if (/^Killing (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Killing (.+)$/i, (match, prefix) => {
                 return "正在终止 " + translateCountList(prefix);
             });
         }
-        if (/^Run (.+)$/i.test(valNorm)) {
+        if (/^Run (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Run (.+)$/i, (match, prefix) => {
                 if (/^command finished$/i.test(prefix)) return "命令执行完成";
                 if (/^task finished$/i.test(prefix)) return "任务执行完成";
@@ -661,12 +683,37 @@ function generateJs(preloadedDict) {
                 return num + unitStr;
             });
         }
+        // 完整时间戳句式："3 hours ago" / "1 minute ago"（单节点形态；客户端拆分渲染时由字典分片键兜底）
+        if (/^(\\d+)\\s+(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\\s+ago$/i.test(valNorm)) {
+            return valNorm.replace(/^(\\d+)\\s+(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\\s+ago$/i, (m, num, unit) => {
+                const u = unit.toLowerCase();
+                let cn = "秒前";
+                if (u.startsWith('minute')) cn = "分钟前";
+                else if (u.startsWith('hour')) cn = "小时前";
+                else if (u.startsWith('day')) cn = "天前";
+                else if (u.startsWith('week')) cn = "周前";
+                else if (u.startsWith('month')) cn = "个月前";
+                else if (u.startsWith('year')) cn = "年前";
+                return num + " " + cn;
+            });
+        }
         if (/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i.test(valNorm)) {
             return valNorm.replace(/^Are you sure you want to delete (the |this )?(project group|project|workspace)?\\s*(.+?)\\??$/i, (match, article, type, name) => {
-                let typeStr = "项目";
-                if (type && type.toLowerCase().includes('group')) typeStr = "项目分组";
-                else if (type && type.toLowerCase() === 'workspace') typeStr = "工作区";
-                return "您确定要删除 " + typeStr + " " + name + " 吗？";
+                let typeStr = "";
+                if (type) {
+                    const tLower = type.toLowerCase().trim();
+                    if (tLower.includes('group')) typeStr = "项目分组";
+                    else if (tLower === 'workspace') typeStr = "工作区";
+                    else if (tLower === 'project') typeStr = "项目";
+                }
+                let artStr = "";
+                if (article) {
+                    artStr = article.toLowerCase().startsWith('this') ? "此" : "该";
+                }
+                const prefixTarget = artStr + typeStr;
+                // 清洗结尾问号吞噬：裸类型句式（如 "…delete this project?"）中 "?" 会被 (.+?)\\??$ 吞进名称捕获
+                const cleanName = String(name || '').replace(/\\?+$/, '').trim();
+                return "您确定要删除" + prefixTarget + (cleanName ? " " + cleanName : "") + (cleanName ? " 吗？" : "吗？");
             });
         }
         if (/^This will permanently delete (\\d+) active conversations? within it\\.?$/i.test(valNorm)) {
@@ -681,7 +728,7 @@ function generateJs(preloadedDict) {
         if (/^(.+?): i\\/o timeout$/i.test(valNorm)) {
             return valNorm.replace(/^(.+?): i\\/o timeout$/i, '$1: I\\/O 超时 (i\\/o timeout)');
         }
-        if (/^Updated (.+)$/i.test(valNorm)) {
+        if (/^Updated (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Updated (.+)$/i, '更新于 $1');
         }
         // 动态属性与控件正则
@@ -744,9 +791,30 @@ function generateJs(preloadedDict) {
         return translateString(v, null);
     }
 
+    function translateDocumentTitle(title) {
+        if (!title || typeof title !== 'string') return title;
+        const valNorm = norm(title);
+        if (!valNorm) return title;
+        const exact = lookup(valNorm);
+        if (exact) return exact;
+        // 复合标题分段匹配（例如 "New chat — Antigravity" / "Settings - Antigravity"）
+        const compoundMatch = valNorm.match(/^(.+?)\\s*([—–\\-])\\s*(.+)$/);
+        if (compoundMatch) {
+            const prefix = compoundMatch[1].trim();
+            const sep = compoundMatch[2];
+            const suffix = compoundMatch[3].trim();
+            const prefixCn = lookup(prefix) || translateString(prefix, null) || prefix;
+            const suffixCn = lookup(suffix) || translateString(suffix, null) || suffix;
+            if (prefixCn !== prefix || suffixCn !== suffix) {
+                return prefixCn + ' ' + sep + ' ' + suffixCn;
+            }
+        }
+        return translateString(valNorm, null) || title;
+    }
+
     function translateElementAttrs(node) {
         if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
-        for (const attr of ['placeholder', 'title', 'aria-label']) {
+        for (const attr of TRANSLATABLE_ATTRS) {
             const v = node.getAttribute(attr);
             if (v) {
                 const trans = translateAttrValue(v);
@@ -759,13 +827,17 @@ function generateJs(preloadedDict) {
     try {
         if (typeof Element !== 'undefined' && Element.prototype) {
             const origSetAttr = Element.prototype.setAttribute;
-            const INTERCEPT_ATTRS = new Set(['title', 'aria-label', 'placeholder', 'data-tooltip', 'data-tip', 'data-title', 'data-balloon']);
             Element.prototype.setAttribute = function(name, value) {
-                if (typeof value === 'string' && INTERCEPT_ATTRS.has(name)) {
-                    // 已是中文则直接跳过，避免重复处理
-                    if (!/[\\u4e00-\\u9fa5]/.test(value)) {
-                        const trans = translateAttrValue(value);
-                        if (trans) value = trans;
+                if (typeof value === 'string' && TRANSLATABLE_ATTRS_SET.has(name)) {
+                    // 禁区检查：若处于硬代码禁区内部且不是常规输入框 placeholder，跳过翻译
+                    const isBlocked = typeof this.closest === 'function' && this.closest(ALL_BLOCKED_SELECTOR);
+                    const tag = this.tagName ? this.tagName.toUpperCase() : '';
+                    const isInputControl = (tag === 'INPUT' || tag === 'TEXTAREA') && name === 'placeholder';
+                    if (!isBlocked || isInputControl) {
+                        if (!/[\\u4e00-\\u9fa5]/.test(value)) {
+                            const trans = translateAttrValue(value);
+                            if (trans) value = trans;
+                        }
                     }
                 }
                 return origSetAttr.call(this, name, value);
@@ -778,12 +850,35 @@ function generateJs(preloadedDict) {
                 Object.defineProperty(HTMLElement.prototype, 'title', {
                     set: function(val) {
                         if (typeof val === 'string' && !/[\\u4e00-\\u9fa5]/.test(val)) {
-                            const trans = translateAttrValue(val);
-                            if (trans) val = trans;
+                            const isBlocked = typeof this.closest === 'function' && this.closest(ALL_BLOCKED_SELECTOR);
+                            if (!isBlocked) {
+                                const trans = translateAttrValue(val);
+                                if (trans) val = trans;
+                            }
                         }
                         return origTitleDesc.set.call(this, val);
                     },
                     get: origTitleDesc.get,
+                    configurable: true,
+                    enumerable: true
+                });
+            }
+        }
+
+        // document.title 拦截器：拦截页面标题动态设置，即时汉化窗口与标签栏标题
+        const docProto = (typeof Document !== 'undefined' && Document.prototype) || (typeof HTMLDocument !== 'undefined' && HTMLDocument.prototype);
+        if (docProto) {
+            const origDocTitleDesc = Object.getOwnPropertyDescriptor(docProto, 'title');
+            if (origDocTitleDesc && origDocTitleDesc.set) {
+                Object.defineProperty(docProto, 'title', {
+                    set: function(val) {
+                        if (typeof val === 'string' && !/[\\u4e00-\\u9fa5]/.test(val)) {
+                            const trans = translateDocumentTitle(val);
+                            if (trans) val = trans;
+                        }
+                        return origDocTitleDesc.set.call(this, val);
+                    },
+                    get: origDocTitleDesc.get,
                     configurable: true,
                     enumerable: true
                 });
@@ -806,11 +901,30 @@ function generateJs(preloadedDict) {
                 return;
             }
 
+            // 文档窗口标题（<title> 文本）：走复合标题分段翻译（world 无关路径，覆盖框架在主 world 直接改 document.title 的场景）
+            const titleParent = node.parentElement;
+            if (titleParent && titleParent.tagName === 'TITLE') {
+                if (!/[\\u4e00-\\u9fa5]/.test(originalVal)) {
+                    const tTrans = translateDocumentTitle(originalVal);
+                    if (tTrans && tTrans !== originalVal) {
+                        translatedValues.set(node, tTrans);
+                        isMutating = true;
+                        try {
+                            node.nodeValue = tTrans;
+                        } finally {
+                            isMutating = false;
+                        }
+                    }
+                }
+                // 标题节点不进漏译采集池（品牌词等高频噪声）
+                return;
+            }
+
             const valNorm = norm(originalVal);
 
             // 文本物理特征防御：过滤文件路径、代码文件名、网址URL、UUID/Hash与命令行参数
             if (/^(https?:\\/\\/|[a-zA-Z]:[\\\\/]|[\\\\/][a-zA-Z0-9_.-]|\\.[\\\\/]|\\.\\.[\\\\/])/.test(valNorm)) return;
-            if (/^[a-zA-Z0-9_\\-.]+\\.(js|ts|jsx|tsx|json|py|go|rs|cpp|c|h|hpp|java|kt|dart|html|css|scss|md|mdx|yaml|yml|toml|xml|sql|sh|bat|ps1|asar|exe|dll|zip|tar|gz|png|jpg|svg|ico)$/i.test(valNorm)) return;
+            if (/^[a-zA-Z0-9_\\-.]+\\.(js|ts|jsx|tsx|json|py|go|rs|cpp|c|h|hpp|java|kt|dart|html|css|scss|md|mdx|yaml|yml|toml|xml|sql|sh|bat|ps1|asar|exe|dll|zip|tar|gz|png|jpg|svg|ico|txt|log|env)$/i.test(valNorm)) return;
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valNorm)) return;
             if (/^[0-9a-f]{7,40}$/i.test(valNorm)) return;
             if (/^--?[a-zA-Z0-9_\\-]+(=.*)?$/.test(valNorm)) return;
@@ -823,12 +937,11 @@ function generateJs(preloadedDict) {
             const transRes = translateString(valNorm, node);
             const newVal = transRes || originalVal;
 
-            let leadingWs = originalVal.startsWith(' ') ? ' ' : '';
-            let trailingWs = originalVal.endsWith(' ') ? ' ' : '';
-            if (!leadingWs && node.parentElement && (node.parentElement.className || '').includes('opacity-70')) {
-                const pBtn = node.parentElement.closest('button[data-testid="model-selector-trigger"]');
-                if (pBtn) leadingWs = ' ';
-            }
+            // 空格保真：保留完整首尾空白段（pre-line/pre-wrap 容器内的缩进与列对齐不塌缩）
+            const wsLead = originalVal.match(/^\\s+/);
+            const wsTrail = originalVal.match(/\\s+$/);
+            let leadingWs = wsLead ? wsLead[0] : '';
+            let trailingWs = wsTrail ? wsTrail[0] : '';
             const finalVal = leadingWs + newVal + trailingWs;
             if (finalVal !== originalVal) {
                 translatedValues.set(node, finalVal);
@@ -838,7 +951,7 @@ function generateJs(preloadedDict) {
                 } finally {
                     isMutating = false;
                 }
-            } else if (/[a-zA-Z]/.test(valNorm)) {
+            } else if (/[a-zA-Z]/.test(valNorm) && !/[\u4e00-\u9fa5]/.test(valNorm) && !(transRes && transRes === valNorm)) {
                 if (!/^#L\\d+(-\\d+)?$/i.test(valNorm)) {
                     if (missedTexts.size < MISSED_TEXTS_MAX) missedTexts.add(valNorm);
                 }
@@ -875,11 +988,22 @@ function generateJs(preloadedDict) {
             acceptNode: function(n) {
                 if (n.nodeType === Node.ELEMENT_NODE) {
                     const tag = n.tagName ? n.tagName.toUpperCase() : '';
-                    if (BLOCKED_TAGS.has(tag)) return NodeFilter.FILTER_REJECT;
+                    // 表单输入与代码标签：先翻译其自身属性（如 input 的 placeholder/title），然后整树跳过内部
+                    if (BLOCKED_TAGS.has(tag)) {
+                        translateElementAttrs(n);
+                        return NodeFilter.FILTER_REJECT;
+                    }
                     if (typeof n.matches === 'function' && n.matches(ALL_BLOCKED_SELECTOR)) {
                         return NodeFilter.FILTER_REJECT;
                     }
                     translateElementAttrs(n);
+                    if (n.shadowRoot) {
+                        const hostCls = (typeof n.className === 'string' ? n.className : '').toLowerCase();
+                        const hostTag = tag;
+                        if (!hostCls.includes('xterm') && !hostCls.includes('terminal') && !hostCls.includes('monaco') && hostTag !== 'CANVAS') {
+                            translateSubtree(n.shadowRoot);
+                        }
+                    }
                     return NodeFilter.FILTER_SKIP;
                 }
                 if (n.nodeType === Node.TEXT_NODE) {
@@ -930,6 +1054,23 @@ function generateJs(preloadedDict) {
         else setTimeout(runFlush, 0);
     }
 
+    // 队列溢出单次兜底重扫：突发批量超过队列上限时，对整个可翻译树做一次全量重扫，绝不漏译。
+    // 调度策略：requestIdleCallback 可用（真实 Chromium）走空闲周期；否则退化为 queueMicrotask 微任务 —
+    // 微任务在 jsdom 与一切环境中确定性执行，避免依赖定时器时序（setTimeout 在部分环境会被吞导致漏译）。
+    // WeakMap 缓存去重保证与分片队列并行执行时不会重复翻译。
+    let overflowRescanScheduled = false;
+    function scheduleOverflowRescan() {
+        if (overflowRescanScheduled) return;
+        overflowRescanScheduled = true;
+        const run = () => {
+            overflowRescanScheduled = false;
+            try { translateSubtree(document.body || document.documentElement); } catch(e) {}
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run);
+        else if (typeof queueMicrotask === 'function') queueMicrotask(run);
+        else setTimeout(run, 0);
+    }
+
     const observer = new MutationObserver(mutations => {
         if (isMutating) return;
         let count = 0;
@@ -938,7 +1079,10 @@ function generateJs(preloadedDict) {
                 for (const n of m.addedNodes) {
                     if (n.nodeType === Node.ELEMENT_NODE) {
                         const tag = n.tagName ? n.tagName.toUpperCase() : '';
-                        if (BLOCKED_TAGS.has(tag)) continue;
+                        if (BLOCKED_TAGS.has(tag)) {
+                            translateElementAttrs(n);
+                            continue;
+                        }
                         if (typeof n.closest === 'function' && n.closest(ALL_BLOCKED_SELECTOR)) continue;
                     } else if (n.nodeType === Node.TEXT_NODE) {
                         if (!shouldTranslateTextNode(n)) continue;
@@ -946,6 +1090,9 @@ function generateJs(preloadedDict) {
                     if (pendingQueue.length < 200) {
                         pendingQueue.push(n);
                         count++;
+                    } else {
+                        // 队列溢出：不静默丢弃，也不逐节点同步扫描；由空闲周期全量重扫兜底
+                        scheduleOverflowRescan();
                     }
                 }
             } else if (m.type === 'characterData') {
@@ -954,11 +1101,16 @@ function generateJs(preloadedDict) {
                 if (pendingQueue.length < 200) {
                     pendingQueue.push(target);
                     count++;
+                } else {
+                    scheduleOverflowRescan();
                 }
             } else if (m.type === 'attributes') {
                 const target = m.target;
                 if (target && target.nodeType === Node.ELEMENT_NODE) {
-                    if (typeof target.closest === 'function' && target.closest(ALL_BLOCKED_SELECTOR)) {
+                    const tag = target.tagName ? target.tagName.toUpperCase() : '';
+                    const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
+                    const isBlocked = typeof target.closest === 'function' && target.closest(ALL_BLOCKED_SELECTOR);
+                    if (isBlocked && !(isInput && (m.attributeName === 'placeholder' || m.attributeName === 'title' || m.attributeName === 'aria-label'))) {
                         continue;
                     }
                     translateElementAttrs(target);
@@ -986,15 +1138,23 @@ function generateJs(preloadedDict) {
         subtree: true, 
         characterData: true,
         attributes: true,
-        attributeFilter: ['title', 'aria-label', 'placeholder']
+        attributeFilter: TRANSLATABLE_ATTRS
     };
 
     const startEngine = () => {
-        const target = document.body || document.documentElement;
+        // 观察/扫描根节点用 documentElement：覆盖 <head> 内 <title> 的 characterData 变更，
+        // 使主 world 框架设置 document.title 后也能经 MutationObserver 走 TITLE 分支翻译（world 无关路径）
+        const target = document.documentElement || document.body;
         if (target) {
             try { observer.observe(target, obsOpts); } catch (e) {}
             try { translateSubtree(target); } catch(e){}
         }
+        try {
+            if (document.title) {
+                const transTitle = translateDocumentTitle(document.title);
+                if (transTitle && transTitle !== document.title) document.title = transTitle;
+            }
+        } catch (e) {}
     };
 
     // 单次优雅初始化
@@ -1108,6 +1268,17 @@ function translateText(text) {
     if (n === 'No agents running') {
         return '无运行中的智能体';
     }
+    // 复合窗口标题分段（如 "New chat — Antigravity" / "Settings - Antigravity"）
+    const compoundMatch = n.match(/^(.+?)\\s*([—–-])\\s*(.+)$/);
+    if (compoundMatch) {
+        const cP = compoundMatch[1].trim();
+        const cS = compoundMatch[3].trim();
+        const pT = translateText(cP);
+        const sT = translateText(cS);
+        if (pT !== cP || sT !== cS) {
+            return pT + ' ' + compoundMatch[2] + ' ' + sT;
+        }
+    }
     return text;
 }
 
@@ -1159,6 +1330,12 @@ function translateDialogOptions(opts) {
     if (opts.detail && typeof opts.detail === 'string') {
         opts.detail = translateText(opts.detail);
     }
+    if (opts.checkboxLabel && typeof opts.checkboxLabel === 'string') {
+        opts.checkboxLabel = translateText(opts.checkboxLabel);
+    }
+    if (opts.nameFieldLabel && typeof opts.nameFieldLabel === 'string') {
+        opts.nameFieldLabel = translateText(opts.nameFieldLabel);
+    }
     if (opts.buttonLabel && typeof opts.buttonLabel === 'string') {
         opts.buttonLabel = translateText(opts.buttonLabel);
     }
@@ -1197,6 +1374,14 @@ if (electron.Menu) {
             return menu;
         };
     });
+    if (electron.Menu.prototype) {
+        safePatch(electron.Menu.prototype, 'popup', function(origPopup) {
+            return function(options) {
+                if (this && this.items) { try { translateMenuItems(this.items); } catch(e) {} }
+                return origPopup.call(this, options);
+            };
+        });
+    }
 }
 
 // -------------------------------------------------------------
@@ -1213,6 +1398,18 @@ if (electron.Tray && electron.Tray.prototype) {
         return function(toolTip) {
             const translated = typeof toolTip === 'string' ? translateText(toolTip) : toolTip;
             return origSetToolTip.call(this, translated);
+        };
+    });
+}
+
+// -------------------------------------------------------------
+// 2.5 Hook BrowserWindow.setTitle（主进程驱动的窗口标题，如 page-title-updated 截断流程）
+// -------------------------------------------------------------
+if (electron.BrowserWindow && electron.BrowserWindow.prototype) {
+    safePatch(electron.BrowserWindow.prototype, 'setTitle', function(origSetTitle) {
+        return function(title) {
+            if (typeof title === 'string') title = translateText(title);
+            return origSetTitle.call(this, title);
         };
     });
 }
@@ -1316,7 +1513,12 @@ if (electron.app) {
                 const url = (typeof webContents.getURL === 'function' ? webContents.getURL() : '') || '';
                 // 仅对 Antigravity 客户端本地核心窗口注入，跳过 DevTools、外部 Webview / OAuth 登录弹窗
                 if (url.startsWith('http://') || url.startsWith('https://')) {
-                    if (!url.includes('127.0.0.1') && !url.includes('localhost')) return;
+                    try {
+                        const parsedUrl = new URL(url);
+                        if (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost') return;
+                    } catch (_) {
+                        return;
+                    }
                 }
                 if (url.startsWith('devtools://') || url.startsWith('chrome-extension://')) return;
                 webContents.executeJavaScript(RENDERER_INJECTION_CODE).catch(() => {});

@@ -178,7 +178,7 @@ async function runEngine(html) {
   dom.window.close(); dom2.window.close(); dom3.window.close();
 }
 
-// 2.3 属性翻译（常规 UI 深层控件属性全覆盖；代码禁区深层属性 100% 坚决熔断）
+// 2.3 属性翻译（常规 UI 深层控件属性全覆盖；input placeholder/title 全面汉化；代码禁区深层属性 100% 坚决熔断）
 {
   const dom = await runEngine('<div id="attrroot"></div>');
   const doc = dom.window.document;
@@ -188,7 +188,8 @@ async function runEngine(html) {
   doc.getElementById('attrroot').appendChild(wrap);
   await tick();
   check('子树根 title 翻译', wrap.getAttribute('title') === '打开', JSON.stringify(wrap.getAttribute('title')));
-  check('输入框 input 保持受保护（不篡改输入框属性）', doc.getElementById('ip').getAttribute('placeholder') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('placeholder')));
+  check('输入框 input 的 placeholder 属性被正确汉化', doc.getElementById('ip').getAttribute('placeholder') === '设置', JSON.stringify(doc.getElementById('ip').getAttribute('placeholder')));
+  check('输入框 input 的 title 属性被正确汉化', doc.getElementById('ip').getAttribute('title') === '设置', JSON.stringify(doc.getElementById('ip').getAttribute('title')));
   check('深层常规 UI title 翻译', doc.getElementById('btnSettings').getAttribute('title') === '设置', JSON.stringify(doc.getElementById('btnSettings').getAttribute('title')));
   check('深层常规 UI aria-label 翻译', doc.getElementById('bd').getAttribute('aria-label') === '删除', JSON.stringify(doc.getElementById('bd').getAttribute('aria-label')));
   check('边距槽加号 title Add inline comment 翻译', doc.getElementById('gm').getAttribute('title') === '添加行内评论', JSON.stringify(doc.getElementById('gm').getAttribute('title')));
@@ -196,12 +197,11 @@ async function runEngine(html) {
   dom.window.close();
 }
 
-// 2.4 Shadow DOM：仅当宿主本身是插入子树的根时其 shadowRoot 被覆盖（原作者边界；
-// 深层宿主的 shadow 内容不展开，与属性同口径，不扩大翻译面）
+// 2.4 Shadow DOM：常规 UI 宿主 shadow 内容递归翻译；终端与代码宿主坚决阻断
 {
   const dom = await runEngine('<div id="sh-root"></div>');
   const doc = dom.window.document;
-  // 深层宿主：不在覆盖范围
+  // 深层常规宿主：递归展开翻译
   const outer = doc.createElement('div');
   const host = doc.createElement('ag-widget');
   host.attachShadow({ mode: 'open' });
@@ -211,7 +211,19 @@ async function runEngine(html) {
   outer.appendChild(host);
   doc.getElementById('sh-root').appendChild(outer);
   await tick();
-  check('深层宿主 shadow 内容不翻译（边界）', s.textContent === 'Settings', JSON.stringify(s.textContent));
+  check('深层常规宿主 shadow 内容被递归翻译', s.textContent === '设置', JSON.stringify(s.textContent));
+
+  // 终端与代码宿主 shadow：坚决不穿透
+  const xtermHost = doc.createElement('div');
+  xtermHost.className = 'xterm-screen';
+  xtermHost.attachShadow({ mode: 'open' });
+  const xs = doc.createElement('span');
+  xs.textContent = 'Settings';
+  xtermHost.shadowRoot.appendChild(xs);
+  outer.appendChild(xtermHost);
+  await tick();
+  check('终端代码宿主 shadow 内容坚决不翻译', xs.textContent === 'Settings', JSON.stringify(xs.textContent));
+
   // 宿主直插（本身是子树根）：覆盖
   const host2 = doc.createElement('ag-widget2');
   host2.attachShadow({ mode: 'open' });
@@ -224,18 +236,18 @@ async function runEngine(html) {
   dom.window.close();
 }
 
-// 2.5 批量插入走分片队列（150 节点 < 200 上限全部入队；200 上限为原作者性能护栏，溢出丢弃）
+// 2.5 批量插入走分片队列（250 节点超过 200 上限通过即时兜底全量翻译，绝不漏译）
 {
   const dom = await runEngine('<div id="sw"></div>');
   const cont = dom.window.document.getElementById('sw');
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 250; i++) {
     const d = dom.window.document.createElement('div');
     d.textContent = 'Open';
     cont.appendChild(d);
   }
-  await tick(80);
+  await tick(100);
   const texts = Array.from(cont.children).map(c => c.textContent);
-  check('批量插入 150 节点全部分片翻译', texts.every(t => t === '打开'), '未翻译 ' + texts.filter(t => t !== '打开').length + ' 个');
+  check('突发批量插入 250 节点（超过 200 队列上限）通过兜底机制全量翻译', texts.every(t => t === '打开'), '未翻译 ' + texts.filter(t => t !== '打开').length + ' 个');
   dom.window.close();
 }
 
@@ -261,6 +273,108 @@ async function runEngine(html) {
   html += '</div></div>';
   const dom = await runEngine(html);
   check('40 层深嵌套禁区不误译', dom.window.document.getElementById('deep').textContent === 'Save', JSON.stringify(dom.window.document.getElementById('deep').textContent));
+  dom.window.close();
+}
+
+// 2.8 删除确认句式（精确区分 project group / workspace / project / 普通 target）
+{
+  const cases = [
+    ['Are you sure you want to delete this project group backend?', '您确定要删除此项目分组 backend 吗？'],
+    ['Are you sure you want to delete the project my-app?', '您确定要删除该项目 my-app 吗？'],
+    ['Are you sure you want to delete this workspace core?', '您确定要删除此工作区 core 吗？'],
+    ['Are you sure you want to delete this rule?', '您确定要删除此 rule 吗？'],
+    ['Are you sure you want to delete config.json?', '您确定要删除 config.json 吗？'],
+    // 裸类型句式回归：结尾 "?" 不得被吞进名称捕获
+    ['Are you sure you want to delete this project?', '您确定要删除此项目吗？'],
+    ['Are you sure you want to delete the project?', '您确定要删除该项目吗？'],
+    ['Are you sure you want to delete project?', '您确定要删除项目吗？'],
+    ['Are you sure you want to delete this workspace?', '确定要删除此工作区吗？']
+  ];
+  const html = cases.map((c, i) => '<div id="del' + i + '">' + c[0] + '</div>').join('');
+  const dom = await runEngine(html);
+  cases.forEach((c, i) => {
+    const got = dom.window.document.getElementById('del' + i).textContent;
+    check('删除确认句式 "' + c[0] + '"', got === c[1], '实际: ' + JSON.stringify(got));
+  });
+  dom.window.close();
+}
+
+// 2.9 AI 长句/段落安全门禁（宽泛正则不得误篡改英文长句段落）
+{
+  const longProseCases = [
+    'Updated the configuration file according to the user instructions and restarted the server.',
+    'Ran the deployment script across multiple environments to verify the build output.',
+    'Checked all unit tests and integration tests before submitting the pull request for review.',
+    'Killed all background processes that were holding onto the database lock unexpectedly.',
+    'Run the provided test suite using npm test to confirm that all 100 cases pass without error.',
+    // 门禁完整性补充：其余宽泛句式同样不得改写长句
+    'Searched the workspace for all references to the deprecated API before making changes.',
+    'A comprehensive analysis of the request across all files finished',
+    'Checked task 42: verify all tests pass before merging the feature branch.',
+    'Status: all systems operational across the entire deployment fleet',
+    'Learn more about whether the agent should run tools in your project workspace'
+  ];
+  const html = longProseCases.map((c, i) => '<p id="lp' + i + '">' + c + '</p>').join('');
+  const dom = await runEngine(html);
+  longProseCases.forEach((c, i) => {
+    const got = dom.window.document.getElementById('lp' + i).textContent;
+    check('AI 长句安全门禁防误篡改 #' + i, got === c, '实际: ' + JSON.stringify(got));
+  });
+  dom.window.close();
+}
+
+// 2.10 document.title 拦截与分段翻译
+{
+  const dom = await runEngine('<html><head><title>Antigravity</title></head><body></body></html>');
+  const doc = dom.window.document;
+  doc.title = 'New chat — Antigravity';
+  check('document.title 复合标题拆分翻译 (New chat — Antigravity)', doc.title === '新会话 — Antigravity', JSON.stringify(doc.title));
+  doc.title = 'Settings - Antigravity';
+  check('document.title 复合标题拆分翻译 (Settings - Antigravity)', doc.title === '设置 - Antigravity', JSON.stringify(doc.title));
+  // 观察器路径：框架绕过 setter 直接改 <title> 文本（主 world 场景），TITLE 节点分支必须兜住
+  doc.querySelector('title').textContent = 'Settings - Antigravity';
+  await tick();
+  check('document.title（<title> 文本变更经 observer 翻译）', doc.title === '设置 - Antigravity', JSON.stringify(doc.title));
+  dom.window.close();
+}
+
+// 2.11 用户内容整树隔离（用户消息容器与历史会话行）
+{
+  const dom = await runEngine('<div id="u"><div data-message-author="user"><p id="ua">Build failing</p><button id="ub">Retry</button></div><div data-turn-role="user"><p id="ut">Please fix the bug</p></div><div data-testid="conversation-item"><span id="ci">My Project Alpha</span><span id="ct">2 hours ago</span></div><div id="ok">Save</div></div>');
+  const doc = dom.window.document;
+  check('用户消息正文不翻译', doc.getElementById('ua').textContent === 'Build failing', JSON.stringify(doc.getElementById('ua').textContent));
+  check('用户消息容器内操作按钮正常翻译', doc.getElementById('ub').textContent === '重试', JSON.stringify(doc.getElementById('ub').textContent));
+  check('data-turn-role=user 内容不翻译', doc.getElementById('ut').textContent === 'Please fix the bug', JSON.stringify(doc.getElementById('ut').textContent));
+  check('会话行用户标题不翻译', doc.getElementById('ci').textContent === 'My Project Alpha', JSON.stringify(doc.getElementById('ci').textContent));
+  check('禁区外常规 UI 不受影响', doc.getElementById('ok').textContent === '保存', JSON.stringify(doc.getElementById('ok').textContent));
+  dom.window.close();
+}
+
+// 2.12 空格保真：首尾多空格不塌缩
+{
+  const dom = await runEngine('<div id="ws">  Open   </div>');
+  check('多空格缩进保真', dom.window.document.getElementById('ws').textContent === '  打开   ', JSON.stringify(dom.window.document.getElementById('ws').textContent));
+  dom.window.close();
+}
+
+// 2.13 真实 DOM 实证回归：conversation-row-sidebar 行内 truncate 标题隔离（只挡标题，行内时间仍翻译）
+{
+  const dom = await runEngine('<div data-testid="conversation-list-sidebar"><div data-testid="conversation-row-sidebar"><div><span id="ct" class="truncate">My English Title</span></div><span id="ctime">3 hours ago</span></div></div><div id="ok">Save</div>');
+  const d = dom.window.document;
+  check('conversation-row-sidebar 内 truncate 标题不翻译', d.getElementById('ct').textContent === 'My English Title', JSON.stringify(d.getElementById('ct').textContent));
+  check('行内时间元数据仍翻译', d.getElementById('ctime').textContent === '3 小时前', JSON.stringify(d.getElementById('ctime').textContent));
+  check('常规 UI 不受影响', d.getElementById('ok').textContent === '保存', JSON.stringify(d.getElementById('ok').textContent));
+  dom.window.close();
+}
+
+// 2.14 identity 键（译值=原文）不进漏译采集池
+{
+  const dom = await runEngine('<div id="id1">Gemini 3.7 Flash</div><div id="id2">Open</div>');
+  const d = dom.window.document;
+  check('identity 键保持原样', d.getElementById('id1').textContent === 'Gemini 3.7 Flash', JSON.stringify(d.getElementById('id1').textContent));
+  await tick();
+  const dump = typeof d.defaultView.__AG_DUMP_MISSING__ === 'function' ? d.defaultView.__AG_DUMP_MISSING__() : [];
+  check('identity 键不进漏译池', !dump.includes('Gemini 3.7 Flash'), JSON.stringify(dump.slice(0, 5)));
   dom.window.close();
 }
 
@@ -303,15 +417,23 @@ console.log('\n[3] 主进程 core 行为（electron 桩）');
   tr.setToolTip('Quit');
   check('托盘 tooltip 翻译', hook.trayTip === '退出', JSON.stringify(hook.trayTip));
 
-  fakeElectron.dialog.showMessageBox({ title: 'Confirm Quit', message: 'Are you sure you want to quit?' });
+  fakeElectron.dialog.showMessageBox({
+    title: 'Confirm Quit',
+    message: 'Are you sure you want to quit?',
+    checkboxLabel: 'Do not show again'
+  });
   check('对话框 title 翻译', hook.dialogOpts.title === '确认退出', JSON.stringify(hook.dialogOpts.title));
   check('对话框 message 翻译', hook.dialogOpts.message === '您确定要退出吗？', JSON.stringify(hook.dialogOpts.message));
+  check('对话框 checkboxLabel 翻译', hook.dialogOpts.checkboxLabel === '不再显示', JSON.stringify(hook.dialogOpts.checkboxLabel));
 
   fakeElectron.dialog.showErrorBox('Version 1.2.3', '3 running');
   check('core 动态正则 Version', hook.errBox[0] === '版本 1.2.3', JSON.stringify(hook.errBox[0]));
   check('core 动态正则 N running', hook.errBox[1] === '3 个智能体运行中', JSON.stringify(hook.errBox[1]));
 
   check('core 含 showErrorBox hook', core.includes('showErrorBox'));
+  check('core 含 Menu.prototype.popup hook', core.includes('popup'));
+  check('core 含 BrowserWindow.setTitle hook', core.includes("BrowserWindow.prototype, 'setTitle'"));
+  check('core 含窗口标题复合分段', core.includes('compoundMatch'));
   check('core 含 updateActions 同步', core.includes('syncUpdaterActions') && core.includes("require('./updater')"));
   check('core 含 Notification hook', core.includes('HanhuaNotification') && core.includes('electron.Notification'));
   check('渲染引擎 nowrap 注入仅限控件（不再强制 width）', !js.includes("min-width', 'fit-content"));
@@ -405,7 +527,7 @@ function loadDictForBrand(mode) {
   fs.rmSync(p, { force: true });
   return d;
 }
-check('english 模式：Antigravity 键删除（保持英文原样）', loadDictForBrand('english')['Antigravity'] === undefined);
+check('english 模式：Antigravity 保持英文原样（identity 键，不进漏译池）', loadDictForBrand('english')['Antigravity'] === 'Antigravity');
 check('hidden 模式：Antigravity → 空串', loadDictForBrand('hidden')['Antigravity'] === '');
 check('translated 模式：Antigravity → 反重力（选项 3 生效）', loadDictForBrand('translated')['Antigravity'] === '反重力');
 
