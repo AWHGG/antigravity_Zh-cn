@@ -114,7 +114,7 @@ function probe(port) {
   afterMissing.slice(0, 30).forEach(t => console.log('  ', JSON.stringify(t)));
 
   // 验证关键修复项
-  for (const probe of ['High', 'Labs', 'Developer', 'CitC Settings', 'Regroup Google3 Chats', 'Loading token usage...', 'Main Agent', 'Select branch']) {
+  for (const probe of ['View could not be opened', 'Artifact not found', 'Add Comment', 'Labs', 'Developer', 'CitC Settings', 'Regroup Google3 Chats', 'Loading token usage...', 'Main Agent', 'Select branch']) {
     const found = after.find(t => t === probe);
     console.log('  检查', JSON.stringify(probe), found ? '→ 仍漏译!' : '→ 已翻译 ✓');
   }

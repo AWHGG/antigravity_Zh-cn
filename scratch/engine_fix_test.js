@@ -102,17 +102,35 @@ async function runEngine(html) {
 
 // 2.1 基础翻译 + 三级边界（禁区/流式区/交互控件）
 {
-  const dom = await runEngine('<main><div id="plain">Open</div><button id="btn">Save</button><div class="monaco-editor"><span id="code">Open</span></div><div class="prose"><span id="prose">Settings</span></div><div translate="no"><span id="tno">Open</span></div><svg><text id="svgtext">Open</text></svg><style id="instyle">.active { color: red }</style><p id="longp">Analyzing the spatial relationships observed in the original label compared to the current output</p></main>');
+  const dom = await runEngine('<main><div id="plain">Open</div><button id="btn">Save</button><div class="artifact-preview"><div class="artifact-code"><div class="monaco-editor" data-mode-id="javascript"><div class="lines-content"><div class="view-line"><span id="artCode">replace</span></div></div><div class="glyph-margin"><button id="artBtn" title="Add inline comment">+</button></div></div></div></div><div class="monaco-editor" data-mode-id="javascript"><div class="lines-content"><div class="view-line"><span id="tokenReplace">replace</span><span id="tokenOpen">open</span></div></div><div class="view-lines"><span id="code">Open</span><button id="editorBtn">Open</button></div><div class="glyph-margin"><button id="glyphBtn" title="Add inline comment">+</button><div id="glyphTip">Add inline comment</div></div></div><div class="prose"><span id="prose">Settings</span><button id="proseBtn">Save</button></div><div translate="no"><span id="tno">Open</span></div><svg><text id="svgtext">Open</text></svg><style id="instyle">.active { color: red }</style><p id="longp">Analyzing the spatial relationships observed in the original label compared to the current output</p><div class="editor-pane"><div id="err1">View could not be opened</div><div id="err2">Artifact not found</div></div><div class="step-item"><div id="tip">Open Diff</div></div></main>');
   // $ 接收 CSS 选择器（'#id'），用 querySelector；此前误用 getElementById(id) 却传 '#id'，导致所有元素查不到
   const $ = sel => dom.window.document.querySelector(sel);
   check('普通文本 Open → 打开', $('#plain').textContent === '打开', JSON.stringify($('#plain').textContent));
   check('button 控件 Save → 保存', $('#btn').textContent === '保存', JSON.stringify($('#btn').textContent));
-  check('monaco 禁区不翻译', $('#code').textContent === 'Open', JSON.stringify($('#code').textContent));
+  check('交付件内部代码 replace 坚决熔断不篡改', $('#artCode').textContent === 'replace', JSON.stringify($('#artCode').textContent));
+  check('交付件边距槽加号 title Add inline comment → 添加行内评论', $('#artBtn').getAttribute('title') === '添加行内评论', JSON.stringify($('#artBtn').getAttribute('title')));
+  check('代码行 token replace 绝不被篡改为替换', $('#tokenReplace').textContent === 'replace', JSON.stringify($('#tokenReplace').textContent));
+  check('代码行 token open 绝不被篡改为打开', $('#tokenOpen').textContent === 'open', JSON.stringify($('#tokenOpen').textContent));
+  check('view-lines 代码禁区不翻译', $('#code').textContent === 'Open', JSON.stringify($('#code').textContent));
+  check('view-lines 内部 button 绝不开口子', $('#editorBtn').textContent === 'Open', JSON.stringify($('#editorBtn').textContent));
+  check('data-mode-id 外壳下边距槽加号 title Add inline comment → 添加行内评论', $('#glyphBtn').getAttribute('title') === '添加行内评论', JSON.stringify($('#glyphBtn').getAttribute('title')));
+  check('边距槽加号气泡 Add inline comment → 添加行内评论', $('#glyphTip').textContent === '添加行内评论', JSON.stringify($('#glyphTip').textContent));
   check('AI prose 流式区不翻译', $('#prose').textContent === 'Settings', JSON.stringify($('#prose').textContent));
+  check('AI prose 内部 HTML button 绝不开口子', $('#proseBtn').textContent === 'Save', JSON.stringify($('#proseBtn').textContent));
   check('[translate=no] 容器不翻译', $('#tno').textContent === 'Open', JSON.stringify($('#tno').textContent));
-  check('SVG <text> 不翻译（标签口径对齐）', $('#svgtext').textContent === 'Open', JSON.stringify($('#svgtext').textContent));
+  check('SVG <text> 不翻译（标签口齐）', $('#svgtext').textContent === 'Open', JSON.stringify($('#svgtext').textContent));
   check('body 内联 <style> 内容不被篡改', $('#instyle').textContent.includes('.active { color: red }'), JSON.stringify($('#instyle').textContent));
   check('字典未命中的长句保持原样', $('#longp').textContent.includes('Analyzing the spatial'), JSON.stringify($('#longp').textContent));
+  check('空状态 View could not be opened → 无法打开视图', $('#err1').textContent === '无法打开视图', JSON.stringify($('#err1').textContent));
+  check('空状态 Artifact not found → 未找到交付件', $('#err2').textContent === '未找到交付件', JSON.stringify($('#err2').textContent));
+  check('常规UI气泡 Open Diff → 打开差异对比', $('#tip').textContent === '打开差异对比', JSON.stringify($('#tip').textContent));
+  // 测试原生 setter 0 毫秒透明拦截
+  const dynamicBtn = dom.window.document.createElement('button');
+  dynamicBtn.title = 'Add inline comment';
+  check('原生 HTMLElement.prototype.title 动态赋值瞬间拦截', dynamicBtn.title === '添加行内评论', JSON.stringify(dynamicBtn.title));
+  const dynamicInput = dom.window.document.createElement('input');
+  dynamicInput.setAttribute('placeholder', 'Add inline comment');
+  check('原生 setAttribute 动态赋值瞬间拦截', dynamicInput.getAttribute('placeholder') === '添加行内评论', JSON.stringify(dynamicInput.getAttribute('placeholder')));
   dom.window.close();
 }
 
@@ -131,6 +149,16 @@ async function runEngine(html) {
     ['A scheduled task with ID t1 already exists.', 'ID 为 t1 的任务已存在。'],
     ['+ Skill', '+ 技能'],
     ['Skill (S)', '技能 (S)'],
+    ['Timed 3 seconds', '计时 3 秒'],
+    ['Status: Fired', '状态：已触发'],
+    ['The command exited with code 0. Output: True', '命令已退出，退出码 0。输出：True'],
+    ['Verify app.asar extraction finished', 'Verify app.asar extraction 已完成'],
+    ['Stage and commit all changes', '暂存并提交所有更改'],
+    ['Push', '推送'],
+    ['No remote configured', '未配置远程仓库'],
+    ['Include unstaged changes', '包含未暂存的更改'],
+    ['Describe your changes, or leave empty to auto-generate', '描述您的更改，或留空以自动生成'],
+    ['Commit 8 file changes to master', '提交 8 个文件更改至 master'],
   ];
   const html = cases.map((c, i) => '<div id="dyn' + i + '">' + c[0].replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
   const dom = await runEngine(html);
@@ -149,27 +177,21 @@ async function runEngine(html) {
   dom.window.close(); dom2.window.close(); dom3.window.close();
 }
 
-// 2.3 属性翻译边界（原作者设计：仅插入子树根的 placeholder/title/aria-label 参与翻译，
-// 深层元素属性不展开——title/aria-label 常携带数据（路径/名称），不得纳入翻译面）
+// 2.3 属性翻译（常规 UI 深层控件属性全覆盖；代码禁区深层属性 100% 坚决熔断）
 {
   const dom = await runEngine('<div id="attrroot"></div>');
   const doc = dom.window.document;
   const wrap = doc.createElement('div');
   wrap.setAttribute('title', 'Open');
-  wrap.innerHTML = '<input id="ip" placeholder="Settings" title="Settings"><button id="bd" aria-label="Delete">X</button>';
+  wrap.innerHTML = '<input id="ip" placeholder="Settings" title="Settings"><button id="btnSettings" title="Settings">S</button><button id="bd" aria-label="Delete">X</button><div class="glyph-margin"><div id="gm" title="Add inline comment">+</div></div><div class="lines-content"><div id="codeAttr" title="Add inline comment">code</div></div>';
   doc.getElementById('attrroot').appendChild(wrap);
   await tick();
   check('子树根 title 翻译', wrap.getAttribute('title') === '打开', JSON.stringify(wrap.getAttribute('title')));
-  check('深层 placeholder 不翻译（属性翻译仅限根）', doc.getElementById('ip').getAttribute('placeholder') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('placeholder')));
-  check('深层 title 不翻译', doc.getElementById('ip').getAttribute('title') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('title')));
-  check('深层 aria-label 不翻译', doc.getElementById('bd').getAttribute('aria-label') === 'Delete', JSON.stringify(doc.getElementById('bd').getAttribute('aria-label')));
-  // input 直插：观察器按 BLOCKED 口径跳过（原作者设计）
-  const ip2 = doc.createElement('input');
-  ip2.id = 'ip2';
-  ip2.placeholder = 'Settings';
-  doc.getElementById('attrroot').appendChild(ip2);
-  await tick();
-  check('input 直插不入队（BLOCKED 口径）', ip2.getAttribute('placeholder') === 'Settings', JSON.stringify(ip2.getAttribute('placeholder')));
+  check('输入框 input 保持受保护（不篡改输入框属性）', doc.getElementById('ip').getAttribute('placeholder') === 'Settings', JSON.stringify(doc.getElementById('ip').getAttribute('placeholder')));
+  check('深层常规 UI title 翻译', doc.getElementById('btnSettings').getAttribute('title') === '设置', JSON.stringify(doc.getElementById('btnSettings').getAttribute('title')));
+  check('深层常规 UI aria-label 翻译', doc.getElementById('bd').getAttribute('aria-label') === '删除', JSON.stringify(doc.getElementById('bd').getAttribute('aria-label')));
+  check('边距槽加号 title Add inline comment 翻译', doc.getElementById('gm').getAttribute('title') === '添加行内评论', JSON.stringify(doc.getElementById('gm').getAttribute('title')));
+  check('代码禁区 lines-content 内部属性绝不开口子', doc.getElementById('codeAttr').getAttribute('title') === 'Add inline comment', JSON.stringify(doc.getElementById('codeAttr').getAttribute('title')));
   dom.window.close();
 }
 
@@ -229,13 +251,13 @@ async function runEngine(html) {
   dom.window.close();
 }
 
-// 2.7 深层嵌套禁区：40 层普通 div 回溯到 monaco 容器仍熔断
+// 2.7 深层嵌套禁区：40 层普通 div 在 view-lines 容器内仍坚决熔断
 {
-  let html = '<div class="monaco-editor">';
+  let html = '<div class="monaco-editor"><div class="view-lines">';
   for (let i = 0; i < 40; i++) html += '<div>';
   html += '<span id="deep">Save</span>';
   for (let i = 0; i < 40; i++) html += '</div>';
-  html += '</div>';
+  html += '</div></div>';
   const dom = await runEngine(html);
   check('40 层深嵌套禁区不误译', dom.window.document.getElementById('deep').textContent === 'Save', JSON.stringify(dom.window.document.getElementById('deep').textContent));
   dom.window.close();

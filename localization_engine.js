@@ -110,9 +110,11 @@ function generateJs() {
             const styleEl = document.createElement('style');
             styleEl.id = 'ag-chinese-layout-guard';
             styleEl.textContent = [
-                '/* 搜索框与模型选择器微调 */',
-                '.bg-secondary.cursor-pointer { white-space: nowrap !important; word-break: keep-all !important; flex-shrink: 0 !important; }',
-                'button[data-testid="model-selector-trigger"] span.opacity-70 { margin-left: 0.25rem !important; }'
+                '/* 模型选择器微调 */',
+                'button[data-testid="model-selector-trigger"] span.opacity-70 { margin-left: 0.25rem !important; }',
+                '/* 全局操作按钮、快捷键浮层、气泡与菜单项防中文断字折行 */',
+                'button, [role="button"], [role="menuitem"], [role="tooltip"], [role="tab"] { word-break: keep-all !important; flex-shrink: 0 !important; }',
+                'button:not([class*="card"]):not([class*="item-large"]), [role="button"]:not([class*="card"]) { white-space: nowrap !important; }'
             ].join('\\n');
             (document.head || document.documentElement).appendChild(styleEl);
         }
@@ -138,15 +140,12 @@ function generateJs() {
         'SOURCE', 'TRACK', 'IFRAME', 'OBJECT', 'EMBED', 'NOSCRIPT'
     ]);
 
-    // 2. 🛡️ AI 正文、思考链与流式打字专属大容器选择器（精准锁定 AI 正文输出，绝不连坐外部步骤与操作控件）
+    // 2. 🛡️ AI 正文、思考链与流式打字专属小容器（精准锁定真实 Markdown 段落与思考链，绝不连坐消息外壳、步骤条与操作控件）
     const AI_STREAM_PROSE_SELECTOR = [
         '.animate-markdown',
         '.md-divider-spacing',
         '.prose',
         '.markdown-body',
-        '[data-testid*="message-body"]',
-        '[data-testid="message-content"]',
-        '[data-testid="chat-message-content"]',
         '[data-thought]',
         '[data-thinking]',
         '[data-cot]',
@@ -158,16 +157,55 @@ function generateJs() {
         '.stream-thought',
         '.cot-content',
         '.collapsible-thought-content',
-        '[data-is-streaming]',
-        '[data-streaming]',
-        '[data-is-generating]',
-        '[class*="streaming"]',
-        '[class*="typing"]'
+        '[data-is-streaming] .prose',
+        '[data-streaming] .prose',
+        '[data-is-generating] .prose'
     ].join(', ');
 
-    // 3. 禁区选择器（文本判定与元素属性判定共用）：代码/终端/公式/用户输入/历史会话标题等物理熔断区
-    //    svg/math 整树熔断：图标文本、公式符号绝无翻译价值，且堵住 svg <text> 深层文本漏判
-    const FORBIDDEN_SUBTREE_SELECTOR = '.monaco-editor, .monaco-diff-editor, .view-lines, [data-mode-id], [class*="editor-"], .cm-editor, .ace_editor, pre, code, kbd, samp, var, .xterm, .terminal, [class*="terminal-"], input, textarea, [contenteditable="true"], .katex, [translate="no"], .notranslate, [class*="tab-label"], [class*="editor-tab"], .tabs-container [role="tab"], [class*="artifact-tab"], [class*="artifact-card"], [class*="artifact-badge"], [class*="artifact-header"], [class*="artifact-title"], [data-testid*="artifact-"], [class*="user-input-step"], [data-turn-role="user"], [data-message-author="user"], a[href*="/c/"] [class*="truncate"], [data-testid*="conversation-item"] [class*="truncate"], [class*="tool-call-details"], [data-testid*="tool-call-content"], svg, math';
+    // 3. 显微镜级核心安全禁区小容器（拒绝大容器一刀切，精确锁定真正的代码正文、终端缓冲区与用户输入段落）：
+    //    核心锁定：代码行视口、代码块、终端字符屏幕、交付件正文、输入框与用户纯提问文本、公式与免翻标记
+    const FORBIDDEN_SUBTREE_SELECTOR = [
+        // Monaco / VS Code / Diff 代码正文小容器（精准锁定代码行视口，保护代码；释放边距槽.margin加号气泡与面包屑）
+        '.lines-content', '[class*="lines-content"]', '.view-lines', '[class*="view-lines"]', '.view-line', '[class*="view-line"]',
+        '[data-mode-id] .lines-content', '[data-mode-id] .view-lines', '[data-mode-id] .view-line',
+        '.monaco-diff-editor .lines-content', '.monaco-editor .lines-content',
+        '.decorationsOverviewRuler', '.suggest-widget .monaco-list', '.parameter-hints-widget',
+        // CodeMirror 5 & 6 代码小容器
+        '.cm-content', '[class*="cm-content"]', '.cm-line', '[class*="cm-line"]', '.cm-editor .cm-scroller',
+        '.CodeMirror-lines', '.CodeMirror-line', '.CodeMirror-code',
+        // Ace Editor 代码小容器
+        '.ace_content', '.ace_line', '[class*="ace_line"]', '.ace_layer', '.ace_text-layer',
+        // 通用 Markdown 与 HTML 语法高亮代码小容器
+        'pre', 'code', 'kbd', 'samp', 'var',
+        '.hljs', '.hljs-line', '[class*="hljs-"]', 'code[class*="language-"]', 'pre[class*="language-"]', '[class*="shiki"]',
+        '.code-block pre', '.code-block code', '.code-line', '.line-content',
+        // 终端字符输出小容器（保护终端字符流，释放终端工具栏与新建标签页按钮）
+        '.xterm-screen', '.xterm-rows', '.xterm-row', '.xterm-accessibility', '.xterm-accessibility-tree',
+        '[class*="terminal-screen"]', '[class*="terminal-rows"]',
+        // 真实用户表单输入控件（保护用户输入，释放外层操作按钮）
+        'input', 'textarea', '[contenteditable="true"]', '[role="textbox"]', '[role="searchbox"]',
+        // 公式、免翻标记、矢量图与模板
+        '.katex', '.katex-html', '[translate="no"]', '.notranslate', 'svg', 'math', 'template',
+        // 交付件内部真实正文与代码（精细锁定内部正文与代码，释放外层编辑器边距槽、加号控件与工具条）
+        '[class*="artifact-markdown"] pre', '[class*="artifact-markdown"] code',
+        '[class*="artifact-code"] .lines-content', '[class*="artifact-code"] pre', '[class*="artifact-code"] code',
+        '[class*="artifact-preview"] .lines-content', '[class*="artifact-preview"] pre', '[class*="artifact-preview"] code',
+        '[class*="artifact-content"] pre', '[class*="artifact-content"] code',
+        '[class*="artifact-body"] pre', '[class*="artifact-body"] code',
+        '[class*="artifact-details"] pre', '[class*="artifact-details"] code',
+        // 用户提问纯文本段落（保护提问原文与代码，释放外围操作按钮与时间戳）
+        '[class*="user-input-step"] .whitespace-pre-wrap',
+        '[data-turn-role="user"] .whitespace-pre-wrap',
+        '[data-message-author="user"] .whitespace-pre-wrap',
+        '[data-turn-role="user"] pre', '[data-turn-role="user"] code',
+        // 会话自定义历史标题
+        'a[href*="/c/"] [class*="truncate"]',
+        '[data-testid*="conversation-item"] [class*="truncate"]',
+        // 工具调用内部具体命令输出与终端代码（释放步骤条本身的标题、折叠箭头与悬浮气泡）
+        '[class*="tool-call-details"] pre', '[class*="tool-call-details"] code',
+        '[data-testid*="tool-call-content"] pre', '[data-testid*="tool-call-content"] code',
+        '[class*="tool-call-result"]', '[class*="terminal-output"]'
+    ].join(', ');
 
     // 未命中采集：收集“非禁区但未翻译”的英文文本，便于迭代补全字典（内存 Set 去重，零 I/O 开销）
     const missedTexts = new Set();
@@ -332,12 +370,7 @@ function generateJs() {
             return false;
         }
 
-        // 分支 3：全交互控件、步骤条、导航栏、弹窗模态框、下拉菜单、提示气泡、表单开关与标签 -> 100% 优先直通放行
-        if (el.closest('summary, button, a, [role="button"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"], [role="treeitem"], [role="tooltip"], [role="dialog"], [role="alertdialog"], [aria-expanded], [class*="step-header"], [class*="step-title"], [class*="accordion-trigger"], [class*="collapse-header"], nav, aside, header, footer, [class*="sidebar"], [class*="navigation"], [class*="nav-"], [class*="menu"], [class*="dropdown"], [class*="popover"], [class*="select"], [class*="modal"], [class*="dialog"], [class*="drawer"], [class*="toast"], [class*="tooltip"], [class*="badge"], [class*="tag"], [class*="pill"], [class*="switch"], [class*="toggle"], [class*="tree-item"], [class*="context-menu"], [role="menubar"], [role="menu"], [role="listbox"], label')) {
-            return true;
-        }
-
-        // 分支 4：常规 UI（侧边栏、设置面板、系统菜单、弹窗对话框） -> 100% 默认放行
+        // 分支 3：常规 UI 与交互控件（按钮、菜单、导航、设置面板等） -> 100% 默认放行
         return true;
     }
 
@@ -399,9 +432,44 @@ function generateJs() {
         }
     }
 
-    function translateTextNode(node) {
+    // ⚡【DOM 原生属性 Setter 拦截器（0 毫秒透明拦截）】：
+    // 无论是 React 虚拟 DOM 提交、还是 Monaco 编辑器鼠标悬停时动态执行 el.title = 'Add inline comment'
+    // 或 el.setAttribute('title', 'Add inline comment')，统统在写入的第 0 毫秒瞬间调包为中文！
+    try {
+        if (typeof Element !== 'undefined' && Element.prototype) {
+            const origSetAttr = Element.prototype.setAttribute;
+            const INTERCEPT_ATTRS = new Set(['title', 'aria-label', 'placeholder', 'data-tooltip', 'data-tip', 'data-title', 'data-balloon']);
+            Element.prototype.setAttribute = function(name, value) {
+                if (typeof value === 'string' && INTERCEPT_ATTRS.has(name)) {
+                    const trans = translateAttrValue(value);
+                    if (trans) value = trans;
+                }
+                return origSetAttr.call(this, name, value);
+            };
+        }
+
+        if (typeof HTMLElement !== 'undefined' && HTMLElement.prototype) {
+            const origTitleDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'title');
+            if (origTitleDesc && origTitleDesc.set) {
+                Object.defineProperty(HTMLElement.prototype, 'title', {
+                    set: function(val) {
+                        if (typeof val === 'string') {
+                            const trans = translateAttrValue(val);
+                            if (trans) val = trans;
+                        }
+                        return origTitleDesc.set.call(this, val);
+                    },
+                    get: origTitleDesc.get,
+                    configurable: true,
+                    enumerable: true
+                });
+            }
+        }
+    } catch (e) {}
+
+    function translateTextNode(node, isPreValidated) {
         try {
-            if (!shouldTranslateTextNode(node)) return;
+            if (!isPreValidated && !shouldTranslateTextNode(node)) return;
             let originalVal = node.nodeValue;
             if (!originalVal || originalVal.trim().length < 1) return;
             if (translatedValues.get(node) === originalVal) return;
@@ -422,7 +490,7 @@ function generateJs() {
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valNorm)) return;
 
             // 🛡️ 物理保护 2：纯代码行/函数调用特征（放行动作步骤标题，如 Ran node ...）
-            if (!/^(Ran|Running|Explored|Analyzed|Searched|Edited|Thought for|Worked for|Checked|Killed|Starting|Started)\\b/i.test(valNorm)) {
+            if (!/^(Ran|Running|Explored|Analyzed|Searched|Edited|Thought for|Worked for|Checked|Killed|Starting|Started|Timed|Status|The command exited|Verify|Commit)\\b/i.test(valNorm)) {
                 if (/[a-zA-Z0-9_$]+\\.[a-zA-Z0-9_$]+\\(/.test(valNorm) || /^[a-zA-Z0-9_$]+\\(.*\\)$/.test(valNorm)) return;
             }
 
@@ -502,6 +570,54 @@ function generateJs() {
                         else if (pLower.includes('inherit global')) translatedPreset = "继承全局设置 (Inherit Global)";
                         return "了解更多关于 " + translatedPreset;
                     });
+                } else if (/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^Timed\\s+(\\d+)\\s*(seconds?|minutes?|hours?|s|mins?|hrs?|ms)$/i, (m, num, unit) => {
+                        let uCn = '秒';
+                        const uLower = unit.toLowerCase();
+                        if (uLower.startsWith('m') && !uLower.startsWith('ms')) uCn = '分钟';
+                        else if (uLower.startsWith('h')) uCn = '小时';
+                        else if (uLower === 'ms') uCn = '毫秒';
+                        return '计时 ' + num + ' ' + uCn;
+                    });
+                } else if (/^Status:\\s*(.+)$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^Status:\\s*(.+)$/i, (m, st) => {
+                        const stNorm = norm(st);
+                        let stCn = map.get(stNorm) || lowerMap.get(stNorm.toLowerCase()) || st;
+                        if (stNorm.toLowerCase() === 'fired') stCn = '已触发';
+                        else if (stNorm.toLowerCase() === 'running') stCn = '运行中';
+                        else if (stNorm.toLowerCase() === 'completed') stCn = '已完成';
+                        else if (stNorm.toLowerCase() === 'cancelled') stCn = '已取消';
+                        else if (stNorm.toLowerCase() === 'failed') stCn = '失败';
+                        return '状态：' + stCn;
+                    });
+                } else if (/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^The command exited with code\\s+(\\d+)(?:\\.\\s*Output:\\s*(.*))?$/i, (m, code, out) => {
+                        if (out !== undefined) {
+                            return '命令已退出，退出码 ' + code + '。输出：' + out;
+                        }
+                        return '命令已退出，退出码 ' + code;
+                    });
+                } else if (/^(.+?)\\s+finished$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^(.+?)\\s+finished$/i, (m, prefix) => {
+                        const pNorm = norm(prefix);
+                        const pCn = map.get(pNorm) || lowerMap.get(pNorm.toLowerCase()) || prefix;
+                        return pCn + ' 已完成';
+                    });
+                } else if (/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^(?:Commit\\s+)?(\\d+)\\s+file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, count, branch) => {
+                        if (branch) return '提交 ' + count + ' 个文件更改至 ' + branch;
+                        return '提交 ' + count + ' 个文件更改至';
+                    });
+                } else if (/^file\\s+changes\\s+to(?:\\s+(.*))?$/i.test(valNorm)) {
+                    newVal = valNorm.replace(/^file\\s+changes\\s+to(?:\\s+(.*))?$/i, (m, branch) => {
+                        if (branch) return '个文件更改至 ' + branch;
+                        return '个文件更改至';
+                    });
+                } else if (valNorm.toLowerCase() === 'to') {
+                    const pText = (node.parentElement ? node.parentElement.textContent : '') || '';
+                    if (/master|main|branch|changes|commit|更改|提交/i.test(pText)) {
+                        newVal = originalVal.replace(/\\bto\\b/i, '至');
+                    }
                 } else if (valNorm.includes('了解更多关于') && /inherit\\s+general/i.test(valNorm)) {
                     newVal = valNorm.replace(/inherit\\s+general/gi, '继承通用设置 (Inherit General)');
                 } else if (/^Inherits your (.+?) settings(.*)$/i.test(valNorm)) {
@@ -867,7 +983,11 @@ function generateJs() {
         if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
 
         if (root.nodeType === Node.ELEMENT_NODE) {
-            if (typeof root.closest === 'function' && root.closest(AI_STREAM_PROSE_SELECTOR)) return;
+            // 🚪 根节点前置物理熔断大门禁：若当前子树本身位于核心禁区或 AI 正文内，全树瞬间跳过！
+            if (typeof root.closest === 'function' && 
+                root.closest(FORBIDDEN_SUBTREE_SELECTOR + ', ' + AI_STREAM_PROSE_SELECTOR)) {
+                return;
+            }
             translateElementAttrs(root);
             if (root.shadowRoot) {
                 const hostCls = (typeof root.className === 'string' ? root.className : '').toLowerCase();
@@ -878,20 +998,34 @@ function generateJs() {
             }
         }
 
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        // 🚀【父级直接切断向下扫描器（绝对零回溯）】：单向前向单向流水线
+        // 核心铁律：不回溯父级，而是在遇到安全禁区的“父级”节点时，直接 FILTER_REJECT 切断向下扫描！
+        // 内部成千上万行代码 0 次深入、0 次触碰；合法的常规 UI 节点向下深入时顺带翻译自身属性，到达叶子文本纯粹直通！
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
             acceptNode: function(n) {
-                if (!n || !n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-                const p = n.parentElement;
-                if (!p) return NodeFilter.FILTER_REJECT;
-                const tag = p.tagName ? p.tagName.toUpperCase() : '';
-                if (!shouldTranslateTextNode(n)) return NodeFilter.FILTER_REJECT;
-                return NodeFilter.FILTER_ACCEPT;
+                if (n.nodeType === Node.ELEMENT_NODE) {
+                    const tag = n.tagName ? n.tagName.toUpperCase() : '';
+                    if (BLOCKED_TAGS.has(tag)) return NodeFilter.FILTER_REJECT; // 🛑 标签级父级一刀切断
+                    if (typeof n.matches === 'function') {
+                        if (n.matches(FORBIDDEN_SUBTREE_SELECTOR) || n.matches(AI_STREAM_PROSE_SELECTOR)) {
+                            return NodeFilter.FILTER_REJECT; // 🛑 核心铁律：在安全区“父级”切断向下扫描！整树丢弃，绝不深入！
+                        }
+                    }
+                    // ✅ 走到这里的都是经过父级门禁检验的合法常规 UI 元素：顺带翻译当前元素自身属性（无 querySelector，无 closest 回溯）
+                    translateElementAttrs(n);
+                    return NodeFilter.FILTER_SKIP; // 跳过当前元素自身，继续向下扫描合法的常规子元素
+                }
+                if (n.nodeType === Node.TEXT_NODE) {
+                    if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT; // ✅ 合法常规 UI 叶子文本，0 次向上回溯，绝对纯粹直通！
+                }
+                return NodeFilter.FILTER_SKIP;
             }
         });
 
         let curr = walker.nextNode();
         while (curr) {
-            translateTextNode(curr);
+            translateTextNode(curr, true); // 纯粹直通，0 次向上爬楼梯回溯
             curr = walker.nextNode();
         }
     }
@@ -938,7 +1072,7 @@ function generateJs() {
                     if (n.nodeType === Node.ELEMENT_NODE) {
                         const tag = n.tagName ? n.tagName.toUpperCase() : '';
                         if (BLOCKED_TAGS.has(tag)) continue;
-                        if (typeof n.closest === 'function' && n.closest(AI_STREAM_PROSE_SELECTOR)) continue;
+                        if (typeof n.closest === 'function' && (n.closest(FORBIDDEN_SUBTREE_SELECTOR) || n.closest(AI_STREAM_PROSE_SELECTOR))) continue;
                     } else if (n.nodeType === Node.TEXT_NODE) {
                         if (!shouldTranslateTextNode(n)) continue;
                     }
@@ -953,6 +1087,16 @@ function generateJs() {
                 if (pendingQueue.length < 200) {
                     pendingQueue.push(target);
                     count++;
+                }
+            } else if (m.type === 'attributes') {
+                const target = m.target;
+                if (target && target.nodeType === Node.ELEMENT_NODE) {
+                    if (typeof target.closest === 'function') {
+                        if (target.closest(FORBIDDEN_SUBTREE_SELECTOR + ', ' + AI_STREAM_PROSE_SELECTOR)) {
+                            continue;
+                        }
+                    }
+                    translateElementAttrs(target);
                 }
             }
         }
@@ -972,7 +1116,13 @@ function generateJs() {
     });
     window.__AG_OBSERVER__ = observer;
 
-    const obsOpts = { childList: true, subtree: true, characterData: true };
+    const obsOpts = { 
+        childList: true, 
+        subtree: true, 
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['title', 'aria-label', 'placeholder']
+    };
 
     const startEngine = () => {
         const target = document.body || document.documentElement;
@@ -1647,11 +1797,11 @@ function install20(resourcesDir) {
             try {
                 const localAsar = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar');
                 if (fs.existsSync(localAsar)) {
-                    reExtract = runCommandSync(`"${localAsar}" extract "${bakPath}" "${tempDir}"`);
+                    reExtract = runCommandSync(`"${localAsar}" extract "${asarPath}" "${tempDir}"`);
                 }
             } catch(_){}
             if (!reExtract || !reExtract.success) {
-                reExtract = runCommandSync(`npx -y @electron/asar extract "${bakPath}" "${tempDir}"`);
+                reExtract = runCommandSync(`npx -y @electron/asar extract "${asarPath}" "${tempDir}"`);
             }
             if (reExtract && reExtract.success && fs.existsSync(tempDir)) {
                 console.log(`[解包] 官方原版解包完成，已就绪纯净基座！`);
