@@ -17,7 +17,8 @@ for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json'))) {
       seen.set(nk, { original: k, value: v });
     }
     if (typeof v === 'string') {
-      if (v.includes('\n')) issues.newlineVals.push({ f, k, v });
+      // 键本身含换行的多行词条（归一化后可正常匹配）属有意排版，只有"键无换行而译文引入换行"才是缺陷
+      if (v.includes('\n') && !String(k).includes('\n')) issues.newlineVals.push({ f, k, v });
       if (v === k) issues.identityKeys.push({ f, k });
       if (v.length > 300) issues.longVals.push({ f, k, len: v.length });
     }
@@ -25,9 +26,12 @@ for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json'))) {
 }
 console.log('== 同文件内归一化重复且译文不一致 ==', issues.sameFileVariant.length);
 issues.sameFileVariant.slice(0, 15).forEach(x => console.log(' ', x.f, JSON.stringify(x.a), '=>', JSON.stringify(x.va), ' vs ', JSON.stringify(x.b), '=>', JSON.stringify(x.vb)));
-console.log('== 译文含换行符 ==', issues.newlineVals.length);
+console.log('== 译文含换行符（键无换行而译文引入） ==', issues.newlineVals.length);
 issues.newlineVals.slice(0, 10).forEach(x => console.log(' ', x.f, JSON.stringify(x.k), '->', JSON.stringify(x.v.slice(0, 80))));
-console.log('== 原文=译文（身份键，防误译用途） ==', issues.identityKeys.length);
+console.log('== 原文=译文（身份键，防误译用途，非缺陷） ==', issues.identityKeys.length);
 issues.identityKeys.slice(0, 15).forEach(x => console.log(' ', x.f, JSON.stringify(x.k)));
-console.log('== 超长译文 (>300) ==', issues.longVals.length);
+console.log('== 超长译文 (>300，提示性检查) ==', issues.longVals.length);
 issues.longVals.forEach(x => console.log(' ', x.f, x.len, JSON.stringify(x.k.slice(0, 60))));
+// 门禁判定：变体不一致与意外换行计入失败；身份键与超长译文仅提示
+const bad = issues.sameFileVariant.length + issues.newlineVals.length;
+process.exit(bad ? 1 : 0);

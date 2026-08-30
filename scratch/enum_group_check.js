@@ -73,3 +73,5 @@ for (const [gname, keys] of Object.entries(groups)) {
   }
 }
 console.log(`\n半翻译组数: ${issues}`);
+// 门禁判定：半翻译（部分翻译部分遗留英文）计入失败；全缺组整组未翻译仅提示
+process.exit(issues ? 1 : 0);

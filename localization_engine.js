@@ -258,7 +258,7 @@ function sleepSync(ms) {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     } catch (e) {
         const start = Date.now();
-        while (Date.now() - start < ms) {}
+        while (Date.now() - start < ms) { /* 忙等回退：Atomics.wait 不可用时的同步休眠 */ }
     }
 }
 
@@ -500,7 +500,9 @@ function install20(resourcesDir) {
     const mainJsPath = resolveMainEntry(tempDir);
     const coreJsPath = path.join(path.dirname(mainJsPath), "antigravity_i18n_core.js");
     console.log(`[生成] 正在构建全局单点拦截核心模块 antigravity_i18n_core.js ...`);
-    const coreJsContent = generateI18nCoreJs();
+    // 字典单次加载贯穿全部注入点（core 内核 + preload 渲染层），避免重复读盘与重复键冲突告警
+    const fullDict = loadDictionary();
+    const coreJsContent = generateI18nCoreJs(fullDict);
     fs.writeFileSync(coreJsPath, coreJsContent, 'utf-8');
 
     // 5. 注入 main.js (单点全局切入)
@@ -526,7 +528,7 @@ function install20(resourcesDir) {
         console.log(`[修改] 正在向 preload.js 注入渲染层即时汉化引擎...`);
         let content = fs.readFileSync(preloadPath, 'utf-8');
         const cleanedContent = cleanJsContent(content);
-        const translationJs = generateJs();
+        const translationJs = generateJs(fullDict);
         const newContent = cleanedContent + "\n" + translationJs;
         fs.writeFileSync(preloadPath, newContent, 'utf-8');
         console.log(`[修改] preload.js 注入成功！`);
