@@ -9,8 +9,12 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
     for (const [k, v] of map.entries()) lowerMap.set(k.toLowerCase(), v);
     
 
+    // 归一化前置探测：无弯引号、无非空格空白、无连续空白、无首尾空白时归一化为恒等变换，
+    // 直接返回原串跳过 3 次 replace + trim 的完整正则链（高频路径每文本节点执行）
+    const NEEDS_NORM_RE = /[\u2018\u2019\u201C\u201D]|[^\S ]|\s\s|^\s|\s$/;
     function norm(s) {
         if (!s || typeof s !== 'string') return '';
+        if (!NEEDS_NORM_RE.test(s)) return s;
         return s.replace(/\s+/g, ' ').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').trim();
     }
 
@@ -474,8 +478,8 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         if (/^Available AI Credits: (\d+)$/i.test(valNorm)) {
             return valNorm.replace(/^Available AI Credits: (\d+)$/i, '可用 AI 额度: $1');
         }
-        if (/^Version\s+([\d\.]+)$/i.test(valNorm)) {
-            return valNorm.replace(/^Version\s+([\d\.]+)$/i, '版本 $1');
+        if (/^Version\s+([\d.]+)$/i.test(valNorm)) {
+            return valNorm.replace(/^Version\s+([\d.]+)$/i, '版本 $1');
         }
         if (/^(\d+)(s|m|h|d|w|mo|yr)$/i.test(valNorm)) {
             return valNorm.replace(/^(\d+)(s|m|h|d|w|mo|yr)$/i, (match, num, unit) => {
@@ -517,7 +521,7 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
             return valNorm.replace(/^(.+?): context deadline exceeded$/i, '$1: 请求超时 (context deadline exceeded)');
         }
         if (/^(.+?): i\/o timeout$/i.test(valNorm)) {
-            return valNorm.replace(/^(.+?): i\/o timeout$/i, '$1: I\/O 超时 (i\/o timeout)');
+            return valNorm.replace(/^(.+?): i\/o timeout$/i, '$1: I/O 超时 (i/o timeout)');
         }
         if (/^Updated (.+)$/i.test(valNorm) && !isLongProse(valNorm)) {
             return valNorm.replace(/^Updated (.+)$/i, '更新于 $1');
@@ -546,10 +550,13 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         if (!text || typeof text !== 'string') return null;
         const valNorm = norm(text);
         if (!valNorm) return null;
-        const shortcutTrans = translateWithShortcut(valNorm);
-        if (shortcutTrans) return shortcutTrans;
+        // 字典精确命中优先于快捷键正则剥离：绝大多数字符串为字典键，
+        // O(1) 查表前置可跳过 4 个快捷键正则（已核查字典唯一可双命中的
+        // "Previous match (Shift+Enter)" 其快捷键支路因裸键缺失必然返回 null，调换零行为差异）
         const exactTrans = lookup(valNorm);
         if (exactTrans !== null) return exactTrans;
+        const shortcutTrans = translateWithShortcut(valNorm);
+        if (shortcutTrans) return shortcutTrans;
         const dynamicTrans = translateDynamicText(valNorm, text, node);
         if (dynamicTrans && dynamicTrans !== valNorm) return dynamicTrans;
         return null;
@@ -562,7 +569,7 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
         if (/^[a-zA-Z0-9_\-.]+\.(js|ts|jsx|tsx|json|py|go|rs|cpp|c|h|hpp|java|kt|dart|html|css|scss|md|mdx|yaml|yml|toml|xml|sql|sh|bat|ps1|asar|exe|dll|zip|tar|gz|png|jpg|svg|ico|txt|log|env)$/i.test(valNorm)) return true;
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(valNorm)) return true;
         if (/^[0-9a-f]{7,40}$/i.test(valNorm)) return true;
-        if (/^--?[a-zA-Z0-9_\-]+(=.*)?$/.test(valNorm)) return true;
+        if (/^--?[a-zA-Z0-9_-]+(=.*)?$/.test(valNorm)) return true;
         // 纯代码语法特征过滤：放行动作步骤标题（如 Ran node ...），跳过代码调用特征
         if (!/^(Ran|Running|Explored|Analyzed|Searched|Edited|Thought for|Worked for|Checked|Killed|Starting|Started|Timed|Status|The command exited|Verify|Commit)\b/i.test(valNorm)) {
             if (/[a-zA-Z0-9_$]+\.[a-zA-Z0-9_$]+\(/.test(valNorm) || /^[a-zA-Z0-9_$]+\(.*\)$/.test(valNorm)) return true;
@@ -574,7 +581,7 @@ const AG_I18N_VERSION = '__AG_I18N_VERSION__';
     function translateCompoundTitle(title, translatePart) {
         const valNorm = norm(title);
         if (!valNorm) return null;
-        const compoundMatch = valNorm.match(/^(.+?)\s*([—–\-])\s*(.+)$/);
+        const compoundMatch = valNorm.match(/^(.+?)\s*([—–-])\s*(.+)$/);
         if (!compoundMatch) return null;
         const prefix = compoundMatch[1].trim();
         const sep = compoundMatch[2];

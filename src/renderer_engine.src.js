@@ -163,6 +163,9 @@
 
     function translateAttrValue(v) {
         if (!v || typeof v !== 'string') return null;
+        // 已含中文的属性值直接短路：与 setAttribute/title 拦截器路径行为对齐，
+        // 避免已译属性在 observer attributes 回调中重跑快捷键正则 + 50 余个动态正则全管线
+        if (/[\u4e00-\u9fa5]/.test(v)) return null;
         return translateString(v, null);
     }
 
@@ -187,6 +190,9 @@
 
     function translateElementAttrs(node) {
         if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+        // 无属性元素快速跳过：首屏全量扫描中大量 div/span 无任何属性，
+        // 免去固定 7 次 getAttribute 空转
+        if (!node.attributes || node.attributes.length === 0) return;
         for (const attr of TRANSLATABLE_ATTRS) {
             const v = node.getAttribute(attr);
             if (v) {
@@ -227,7 +233,7 @@
                                 if (trans !== null) val = trans;
                             }
                         }
-                        return origTitleDesc.set.call(this, val);
+                        origTitleDesc.set.call(this, val);
                     },
                     get: origTitleDesc.get,
                     configurable: true,
@@ -247,7 +253,7 @@
                             const trans = translateDocumentTitle(val);
                             if (trans !== null) val = trans;
                         }
-                        return origDocTitleDesc.set.call(this, val);
+                        origDocTitleDesc.set.call(this, val);
                     },
                     get: origDocTitleDesc.get,
                     configurable: true,
