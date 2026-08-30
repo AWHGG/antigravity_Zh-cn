@@ -421,6 +421,107 @@ async function runEngine(html, engineJs) {
   dom.window.close();
 }
 
+// 2.17 动态句式规则全量回归：逐条覆盖 translateDynamicText 的全部规则族
+// （为后续首词分派重构提供 A/B 等价性护栏：重构前后本节输出必须逐字符一致）
+console.log('\n[2.17] 动态句式规则全量覆盖');
+{
+  const cases = [
+    // 词锚定规则
+    ['Refreshes in 45 minutes', '45 分钟后刷新'],
+    ['Learn more about inherit global', '了解更多关于 继承全局设置 (Inherit Global)'],
+    ['Learn more about zzqx', '了解更多关于 zzqx'],
+    ['Timed 250ms', '计时 250 毫秒'],
+    ['Timed 5 mins', '计时 5 分钟'],
+    ['Status: Running', '状态：运行中'],
+    ['Status: Failed', '状态：失败'],
+    ['The command exited with code 1. Output: Error', '命令已退出，退出码 1。输出：Error'],
+    ['The command exited with code 127', '命令已退出，退出码 127'],
+    ['zzqx finished', 'zzqx 已完成'],
+    ['5 file changes to main', '提交 5 个文件更改至 main'],
+    ['file changes to main', '个文件更改至 main'],
+    ['Inherits your zzqx settings', '继承您的zzqx设置'],
+    ['Inherits your general settings', '继承您的通用设置'],
+    ['40% of the customization budget is available', '40% 的定制预算可用。'],
+    ['Send feedback as zzqx', '以 zzqx 身份发送反馈'],
+    ['Your Plan: zzqx', '您的计划：zzqx'],
+    ["Yes, and always allow 'npm install' in this project", "是，且在此项目中始终允许运行 'npm install'"],
+    ["Yes, and always allow 'npm install'", "是，且始终允许运行 'npm install'"],
+    ['7 tools enabled', '7 个工具已启用'],
+    ['Show 5 more...', '显示另外 5 个...'],
+    ['Show all 3 breakdowns', '显示全部 3 个细目'],
+    ['Hide 2 breakdowns', '隐藏 2 个细目'],
+    ['Rules: 1,200 tokens', '规则：1,200 tokens'],
+    ['Skills: 800 tokens', '技能：800 tokens'],
+    ['Media (Yesterday 9:45 PM)', '媒体 (昨天 9:45 PM)'],
+    ['Select model, current: zzqx', '选择模型，当前：zzqx'],
+    ['Refresh MCP servers', '刷新 MCP 服务器'],
+    ['Refresh quota and credits data', '刷新配额与额度数据'],
+    ['Skills providing tailored instructions for happy path dart and flutter development workflows.', '提供为 Dart 和 Flutter 的顺畅 (Happy Path) 开发流程量身定制的技能指令。'],
+    ['Worked for 5s', '已工作 5 秒'],
+    ['Working for 3m', '已工作 3 分钟'],
+    ['Thinking (12s)', '思考中 (12 秒)…'],
+    ['Waiting for tools...', '等待 工具 中...'],
+    ['Thinking for 12s', '已思考 12 秒'],
+    ['Running for 5m', '已运行 5 分钟'],
+    ['Executing for 2h', '已执行 2 小时'],
+    ['Thought for 12s', '思考了 12 秒'],
+    ['Ran 3 commands', '已运行 3 条命令'],
+    ['Running 3 commands', '正在运行 3 条命令'],
+    ['Ran 3 files', '已执行 3 个文件'],
+    ['Searched 10 results', '已搜索 10 个结果'],
+    ['Searched 5 files, 2 folders', '已搜索 5 个文件、2 个文件夹'],
+    ['Starting task deploy', '正在启动任务 deploy'],
+    ['Sent input to task run-tests', '已向任务发送输入 run-tests'],
+    ['Checked task build-site', '已检查任务 build-site'],
+    ['Checking 3 files', '正在检查 3 个文件'],
+    ['Killed 2 tasks', '已终止 2 个任务'],
+    ['Killing 3 tasks', '正在终止 3 个任务'],
+    ['Run command finished', '运行命令 已完成'],
+    ['Run task finished', 'Run task 已完成'],
+    ['Run 2 searches', '运行 2 次搜索'],
+    ['Load older messages, showing 10 of 50', '加载更早的消息，当前显示 10 / 50'],
+    ['3 files changed +10 -2', '3 个文件已改动 +10 -2'],
+    ['3 files changed', '3 个文件已改动'],
+    ['3 subagents running', '3 个子智能体正在运行'],
+    ['2 tasks running', '2 个任务正在运行'],
+    ['3 subagents/tasks running', '3 个子智能体/任务正在运行'],
+    ['+5 more lines', '+5 行'],
+    ['Showing 20 lines', '显示 20 行'],
+    ['Permanently delete my-group, including 3 active conversations.', '永久删除 my-group，包含 3 个活跃会话。'],
+    ['including 3 active conversations.', '包含 3 个活跃会话。'],
+    ['All changes since v1.2.3', '自 v1.2.3 以来的所有更改'],
+    ['See all (12)', '查看全部 (12)'],
+    ['Available AI Credits: 100', '可用 AI 额度: 100'],
+    ['Version 9.9.9', '版本 9.9.9'],
+    ['2h', '2小时前'],
+    ['This will permanently delete 3 active conversations within it.', '此操作将永久删除其中的 3 个活跃会话。'],
+    ['Get data: context deadline exceeded', 'Get data: 请求超时 (context deadline exceeded)'],
+    ['Fetch api: i/o timeout', 'Fetch api: I/O 超时 (i/o timeout)'],
+    ['Updated zzqx', '更新于 zzqx'],
+    ['Plugin: my-plugin', '插件：my-plugin'],
+    ['Toggle sidebar', '切换侧边栏'],
+    ['Enter scheduled task name...', '输入计划任务名称...'],
+    ['Enter automation name...', '输入自动化名称...'],
+    ['Enter a prompt for the agent to run...', '输入供智能体执行的提示词...'],
+    // 通用规则（数字/符号/通配开头）与分派负例
+    ['12 files', '12 个文件'],
+    ['zzqx qwert asdf', 'zzqx qwert asdf'],
+    ['42', '42']
+  ];
+  const html = cases.map((c, i) => '<div id="dr' + i + '">' + c[0].replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
+  const dom = await runEngine(html);
+  cases.forEach((c, i) => {
+    const got = dom.window.document.getElementById('dr' + i).textContent;
+    check('规则 #' + (i + 1) + ' "' + c[0] + '" → "' + c[1] + '"', got === c[1], '实际: ' + JSON.stringify(got));
+  });
+  dom.window.close();
+
+  // 'to' 节点按父级上下文翻译（pattern：node.parentElement 依赖分支，父元素自身须含 git 上下文词）
+  const domTo = await runEngine('<div id="tohost">Commit 5 file changes <span id="tox">to<b>master</b></span></div>');
+  check('独立 to 节点按父级 git 上下文译为 至', domTo.window.document.getElementById('tox').textContent === '至master', JSON.stringify(domTo.window.document.getElementById('tox').textContent));
+  domTo.window.close();
+}
+
 // ---------- 3. 主进程 core 行为（vm + electron 桩） ----------
 console.log('\n[3] 主进程 core 行为（electron 桩）');
 {
