@@ -24,8 +24,8 @@ function translateText(text) {
     if (n === 'No agents running') {
         return '无运行中的智能体';
     }
-    if (/^Version\s*([\d\.]*)$/i.test(n)) {
-        return n.replace(/^Version\s*([\d\.]*)$/i, (match, v) => v ? "版本 " + v : "版本");
+    if (/^Version\s*([\d.]*)$/i.test(n)) {
+        return n.replace(/^Version\s*([\d.]*)$/i, (match, v) => v ? "版本 " + v : "版本");
     }
     // 复合窗口标题分段（如 "New chat — Antigravity" / "Settings - Antigravity"）
     const compound = translateCompoundTitle(text, part => translateText(part));
