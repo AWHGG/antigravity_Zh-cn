@@ -36,8 +36,6 @@ flowchart TD
         H -->|元素节点| I{命中 BLOCKED_TAGS 或 ALL_BLOCKED_SELECTOR?}
         I -->|是| J[NodeFilter.FILTER_REJECT<br/>整树阻断跳过]
         I -->|否| K[translateElementAttrs 翻译属性<br/>NodeFilter.FILTER_SKIP 继续下探]
-        K --> L{存在 shadowRoot 且非代码宿主?}
-        L -->|是| M[递归 translateSubtree 穿透 Shadow DOM]
         H -->|文本节点| N[NodeFilter.FILTER_ACCEPT<br/>送入单节点翻译流]
     end
 
@@ -82,18 +80,16 @@ flowchart TD
 
 ### 阶段二：全量子树扫描逻辑（TreeWalker Pipeline）
 
-当页面首次加载或动态挂载子树时，调用 `translateSubtree(root)` 进行深度遍历（这里的入参 `root` 指的是**当前待扫描子树的起始节点**，可能是整页 `body`，也可能是某个动态新增的局部容器或 ShadowRoot）：
+当页面首次加载或动态挂载子树时，调用 `translateSubtree(root)` 进行深度遍历（这里的入参 `root` 指的是**当前待扫描子树的起始节点**，可能是整页 `body`，也可能是某个动态新增的局部容器）：
 
 1. **子树起始节点前置门禁**：先对传入的 `root` 执行 `root.closest(ALL_BLOCKED_SELECTOR)` 检查。如果当前待扫描的子树容器本身就已经处于代码编辑区、终端字符屏或 AI 流式正文内部（例如动态插入了一行代码容器），直接整树阻断退出，不再做任何无谓扫描。
-2. **元素属性翻译与 Shadow DOM 内部扫描**：
-   - 提取当前起始元素的 `placeholder`、`title`、`aria-label`、`data-tooltip` 等属性并调用 `translateElementAttrs` 翻译；
-   - 若存在 `root.shadowRoot`，检测宿主类名与标签名（排除 `xterm`、`terminal`、`monaco` 与 `CANVAS` 等代码宿主），递归调用 `translateSubtree(root.shadowRoot)` 深入 Shadow DOM 内部翻译组件。
+2. **元素属性翻译**：提取当前起始元素的 `placeholder`、`title`、`aria-label`、`data-tooltip` 等属性并调用 `translateElementAttrs` 翻译。**Shadow DOM 一律不穿透不翻译**：影子树内部文字保持原样，宿主元素自身的属性照常翻译。
 3. **TreeWalker 深度遍历过滤**：
    - 使用 `document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, filter)`；
    - **元素节点过滤 (`acceptNode`)**：
      - 遇到 `BLOCKED_TAGS` 标签黑名单（`SCRIPT`, `STYLE`, `CODE`, `PRE`, `INPUT`, `TEXTAREA`, `SVG`, `CANVAS`, `KBD`, `SAMP`, `VAR`, `TEMPLATE`, `MATH` 等 23 个标签）：**先调用 `translateElementAttrs(n)` 汉化其自身属性（如 input 的 placeholder/title），然后返回 `NodeFilter.FILTER_REJECT` 跳过其子树**（兼顾属性汉化与子节点绝对安全）；
      - 遇到命中 `ALL_BLOCKED_SELECTOR` 禁区选择器的容器（包含 Monaco 编辑区 `.lines-content` / `.view-lines`、CodeMirror `.cm-content`、Xterm 终端 `.xterm-screen`、AI Prose `.prose`、AI Thinking `[data-thought]`、Artifact 正文、用户输入段落等），同样返回 `NodeFilter.FILTER_REJECT` 阻断整树；
-     - 未命中的常规元素：翻译其属性，若包含 `shadowRoot` 则递归扫描，并返回 `NodeFilter.FILTER_SKIP`（跳过元素本身，继续遍历其内部子节点）；
+     - 未命中的常规元素：翻译其属性，并返回 `NodeFilter.FILTER_SKIP`（跳过元素本身，继续遍历其内部子节点）；
    - **文本节点过滤**：空文本返回 `NodeFilter.FILTER_REJECT`，非空文本返回 `NodeFilter.FILTER_ACCEPT`；
    - 循环 `walker.nextNode()`：将所有被 `FILTER_ACCEPT` 选出的文本节点逐个送入 `translateTextNode(curr, true)` 进行翻译。
 

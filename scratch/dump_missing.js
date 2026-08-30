@@ -109,7 +109,7 @@ const SCAN_JS = `(() => {
   }
   function walk(el, inherited) {
     const b = inherited || isBlocked(el);
-    if (el.shadowRoot) walkShadow(el.shadowRoot, b);
+    // Shadow DOM 一律不采集：引擎不翻译影子树，其内容不构成漏译（避免产生永不修复的噪声条目）
     let children = el.children;
     if (!children || !children.length) {
       const t = (el.textContent || '').trim();
@@ -120,9 +120,6 @@ const SCAN_JS = `(() => {
       return;
     }
     for (const c of children) walk(c, b);
-  }
-  function walkShadow(root, b) {
-    for (const el of root.children || []) walk(el, b);
   }
   walk(document.body || document.documentElement, false);
   return out;

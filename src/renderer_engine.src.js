@@ -344,13 +344,7 @@
                 return;
             }
             translateElementAttrs(root);
-            if (root.shadowRoot) {
-                const hostCls = (typeof root.className === 'string' ? root.className : '').toLowerCase();
-                const hostTag = (root.tagName || '').toUpperCase();
-                if (!hostCls.includes('xterm') && !hostCls.includes('terminal') && !hostCls.includes('monaco') && hostTag !== 'CANVAS') {
-                    translateSubtree(root.shadowRoot);
-                }
-            }
+            // Shadow DOM 一律不穿透不翻译：影子树内部文字保持原样（宿主自身属性照常翻译）
         }
 
         // TreeWalker 过滤器：自顶向下遍历，遇到禁区标签或容器直接 REJECT 整树跳过
@@ -366,13 +360,6 @@
                         return NodeFilter.FILTER_REJECT;
                     }
                     translateElementAttrs(n);
-                    if (n.shadowRoot) {
-                        const hostCls = (typeof n.className === 'string' ? n.className : '').toLowerCase();
-                        const hostTag = tag;
-                        if (!hostCls.includes('xterm') && !hostCls.includes('terminal') && !hostCls.includes('monaco') && hostTag !== 'CANVAS') {
-                            translateSubtree(n.shadowRoot);
-                        }
-                    }
                     return NodeFilter.FILTER_SKIP;
                 }
                 if (n.nodeType === Node.TEXT_NODE) {

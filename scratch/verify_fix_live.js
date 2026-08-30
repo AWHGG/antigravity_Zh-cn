@@ -77,7 +77,7 @@ function probe(port) {
     const blockedRe = /monaco|editor|view-line|terminal|xterm|thought|thinking|reasoning|chat-message|message-content|markdown|prose|artifact|snippet|tool-call|notranslate|token|diff-/i;
     function walk(el, inherited) {
       const b = inherited || BLOCKED_TAGS.has(el.tagName) || blockedRe.test(typeof el.className === 'string' ? el.className : '') || (el.getAttribute && el.getAttribute('translate') === 'no');
-      if (el.shadowRoot) { for (const c of el.shadowRoot.children || []) walk(c, b); }
+      // Shadow DOM 一律不采集：引擎不翻译影子树，其内容不构成漏译
       if (!el.children || !el.children.length) {
         const t = (el.textContent || '').trim();
         if (t && /[a-zA-Z]{2,}/.test(t) && t.length < 200 && !b && !seen.has(t)) { seen.add(t); out.push(t); }

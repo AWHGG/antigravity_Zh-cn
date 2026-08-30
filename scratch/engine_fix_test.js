@@ -194,11 +194,11 @@ async function runEngine(html, engineJs) {
   dom.window.close();
 }
 
-// 2.4 Shadow DOM：常规 UI 宿主 shadow 内容递归翻译；终端与代码宿主坚决阻断
+// 2.4 Shadow DOM：一律不穿透不翻译（宿主自身属性照常翻译）
 {
   const dom = await runEngine('<div id="sh-root"></div>');
   const doc = dom.window.document;
-  // 深层常规宿主：递归展开翻译
+  // 常规宿主：shadow 内容保持原样
   const outer = doc.createElement('div');
   const host = doc.createElement('ag-widget');
   host.attachShadow({ mode: 'open' });
@@ -208,9 +208,9 @@ async function runEngine(html, engineJs) {
   outer.appendChild(host);
   doc.getElementById('sh-root').appendChild(outer);
   await tick();
-  check('深层常规宿主 shadow 内容被递归翻译', s.textContent === '设置', JSON.stringify(s.textContent));
+  check('常规宿主 shadow 内容不翻译', s.textContent === 'Settings', JSON.stringify(s.textContent));
 
-  // 终端与代码宿主 shadow：坚决不穿透
+  // 终端与代码宿主 shadow：同样不翻译
   const xtermHost = doc.createElement('div');
   xtermHost.className = 'xterm-screen';
   xtermHost.attachShadow({ mode: 'open' });
@@ -219,17 +219,19 @@ async function runEngine(html, engineJs) {
   xtermHost.shadowRoot.appendChild(xs);
   outer.appendChild(xtermHost);
   await tick();
-  check('终端代码宿主 shadow 内容坚决不翻译', xs.textContent === 'Settings', JSON.stringify(xs.textContent));
+  check('终端代码宿主 shadow 内容不翻译', xs.textContent === 'Settings', JSON.stringify(xs.textContent));
 
-  // 宿主直插（本身是子树根）：覆盖
+  // 宿主直插（本身是子树根）：shadow 内容同样不翻译，宿主自身属性照常翻译
   const host2 = doc.createElement('ag-widget2');
+  host2.title = 'Open';
   host2.attachShadow({ mode: 'open' });
   const s2 = doc.createElement('span');
   s2.textContent = 'Open';
   host2.shadowRoot.appendChild(s2);
   doc.getElementById('sh-root').appendChild(host2);
   await tick();
-  check('宿主直插时 shadowRoot 被翻译', s2.textContent === '打开', JSON.stringify(s2.textContent));
+  check('宿主直插时 shadowRoot 内容不翻译', s2.textContent === 'Open', JSON.stringify(s2.textContent));
+  check('宿主直插时宿主自身属性照常翻译', host2.getAttribute('title') === '打开', JSON.stringify(host2.getAttribute('title')));
   dom.window.close();
 }
 
