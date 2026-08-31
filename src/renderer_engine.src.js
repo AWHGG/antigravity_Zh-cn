@@ -17,7 +17,7 @@
     }
     window.__AG_HANHUA_INSTALLED__ = true;
 
-    // 排版护盾样式：为单行控件（菜单项、Tab、下拉选项与气泡）添加精准排版规则，防止中文在窄容器中异常折行或溢出
+    // 排版护盾样式：仅对被汉化引擎实际翻译过的单行控件激活防拆规则，防止中文在窄容器中异常竖排挤压
     try {
         if (!document.getElementById('ag-chinese-layout-guard')) {
             const styleEl = document.createElement('style');
@@ -25,8 +25,8 @@
             styleEl.textContent = [
                 '/* 模型选择器微调 */',
                 'button[data-testid="model-selector-trigger"] span.opacity-70 { margin-left: 0.25rem !important; }',
-                '/* 菜单项、Tab 标签、下拉选项防中文断字与单字竖排 */',
-                '[role="menuitem"], [role="tab"], [role="option"] { white-space: nowrap !important; }',
+                '/* 仅对实际汉化过的菜单项、Tab 标签、下拉选项与单行小按钮激活防断字 */',
+                '[data-ag-i18n-nowrap][role="menuitem"], [data-ag-i18n-nowrap][role="menuitemcheckbox"], [data-ag-i18n-nowrap][role="menuitemradio"], [data-ag-i18n-nowrap][role="tab"], [data-ag-i18n-nowrap][role="option"], button[data-ag-i18n-nowrap]:not(:has(p)):not(:has(div)):not([class*="flex-col"]):not([class*="text-left"]):not([class*="h-auto"]) { white-space: nowrap !important; }',
                 '/* 气泡与提示允许自适应安全折行，防止超长中文横向穿透 */',
                 '[role="tooltip"] { word-break: normal !important; overflow-wrap: break-word !important; }'
             ].join('\n');
@@ -318,6 +318,14 @@
                 isMutating = true;
                 try {
                     node.nodeValue = finalVal;
+                    // 精准溯源：仅对真正发生汉化文本替换的单行控件父容器打上激活标记
+                    const parentEl = node.parentElement;
+                    if (parentEl && parentEl.nodeType === Node.ELEMENT_NODE && typeof parentEl.closest === 'function') {
+                        const controlEl = parentEl.closest('button, [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="tab"], [role="option"]');
+                        if (controlEl && !controlEl.hasAttribute('data-ag-i18n-nowrap')) {
+                            controlEl.setAttribute('data-ag-i18n-nowrap', '1');
+                        }
+                    }
                 } finally {
                     isMutating = false;
                 }
