@@ -17,7 +17,7 @@
     }
     window.__AG_HANHUA_INSTALLED__ = true;
 
-    // 排版护盾样式：为按钮、菜单、下拉选择器与气泡添加通用防拆防挤压规则，防止中文在弹性布局中由于宽度受限异常折行
+    // 排版护盾样式：为单行控件（菜单项、Tab、下拉选项与气泡）添加精准排版规则，防止中文在窄容器中异常折行或溢出
     try {
         if (!document.getElementById('ag-chinese-layout-guard')) {
             const styleEl = document.createElement('style');
@@ -25,9 +25,10 @@
             styleEl.textContent = [
                 '/* 模型选择器微调 */',
                 'button[data-testid="model-selector-trigger"] span.opacity-70 { margin-left: 0.25rem !important; }',
-                '/* 全局操作按钮、下拉选择器、模式切换框、气泡与菜单项防中文断字与竖排挤压 */',
-                'button, [role="button"], [role="combobox"], [role="menuitem"], [role="tooltip"], [role="tab"], [aria-haspopup="true"], [aria-haspopup="listbox"], [aria-haspopup="menu"], .bg-secondary.cursor-pointer, [class*="cursor-pointer"]:not([class*="card"]):not([class*="item-large"]):not([class*="prose"]):not([class*="message"]) { word-break: keep-all !important; flex-shrink: 0 !important; }',
-                'button:not([class*="card"]):not([class*="item-large"]), [role="button"]:not([class*="card"]), [role="combobox"], [aria-haspopup="true"]:not([class*="card"]), .bg-secondary.cursor-pointer { white-space: nowrap !important; min-width: max-content !important; }'
+                '/* 菜单项、Tab 标签、下拉选项防中文断字与单字竖排 */',
+                '[role="menuitem"], [role="tab"], [role="option"] { white-space: nowrap !important; }',
+                '/* 气泡与提示允许自适应安全折行，防止超长中文横向穿透 */',
+                '[role="tooltip"] { word-break: normal !important; overflow-wrap: break-word !important; }'
             ].join('\n');
             (document.head || document.documentElement).appendChild(styleEl);
         }

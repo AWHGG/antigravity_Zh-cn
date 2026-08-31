@@ -81,7 +81,7 @@ flowchart TD
 当客户端任意窗口被创建并加载页面时，引擎在 `dist/preload.js` 阶段介入，在前端业务框架执行和 DOM 树构建的最早期完成环境配置：
 
 1. **单实例互斥防重锁**：在 `document.documentElement` 上检查并打上 `data-ag-i18n-active="1"` 与 `dataset.agHanhua="1"` 标记，结合 `window.__AG_HANHUA_INSTALLED__` 全局锁，防止多重初始化产生双重监听；若检测到已存在旧的 `window.__AG_OBSERVER__`，主动调用 `disconnect()` 解绑清理。
-2. **注入排版防断字护盾 CSS**：动态向 `<head>` 追加 `<style id="ag-chinese-layout-guard">`，为 `button`, `[role="button"]`, `[role="menuitem"]`, `[role="tooltip"]`, `[role="tab"]` 注入 `word-break: keep-all !important; flex-shrink: 0 !important;` 以及按钮 `white-space: nowrap !important;`，防止中文字符因缺少空格而在窄容器中异常折行。
+2. **注入排版防断字护盾 CSS**：动态向 `<head>` 追加 `<style id="ag-chinese-layout-guard">`，为单行控件（`[role="menuitem"]`, `[role="tab"]`, `[role="option"]`）注入 `white-space: nowrap !important;`，为气泡提示注入 `overflow-wrap: break-word;`，在确保紧凑导航不被垂直挤压的同时避免中文长文本无法折行横向溢出。
 3. **原生属性与标题 Setter 拦截器挂载（猴子补丁）**：
    - 重写 `Element.prototype.setAttribute`：统一拦截 `placeholder`, `title`, `aria-label`, `data-tooltip` 等 7 种属性赋值；前置校验禁区选择器，若不在硬代码禁区（或为输入控件自身）且不含中文，实时翻译为中文。
    - 重写 `HTMLElement.prototype.title`：重写属性描述符的 `set` 访问器，同步翻译被设置的英文 tooltip。
